@@ -1,0 +1,53 @@
+'use strict';
+const { contextBridge, ipcRenderer } = require('electron');
+
+const ALLOWED_EVENTS = new Set([
+  'download:progress',
+  'backend:progress',
+  'server:log',
+  'server:state',
+]);
+
+contextBridge.exposeInMainWorld('api', {
+  info: () => ipcRenderer.invoke('app:info'),
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get'),
+    set: (patch) => ipcRenderer.invoke('settings:set', patch),
+  },
+  hw: {
+    scan: (force) => ipcRenderer.invoke('hw:scan', force),
+  },
+  presets: () => ipcRenderer.invoke('presets:list'),
+  backends: {
+    list: () => ipcRenderer.invoke('backends:list'),
+    install: (id) => ipcRenderer.invoke('backends:install', id),
+    remove: (id) => ipcRenderer.invoke('backends:remove', id),
+  },
+  models: {
+    catalog: () => ipcRenderer.invoke('models:catalog'),
+    search: (q) => ipcRenderer.invoke('models:search', q),
+    files: (repo) => ipcRenderer.invoke('models:files', repo),
+    download: (repo, file) => ipcRenderer.invoke('models:download', { repo, file }),
+    local: () => ipcRenderer.invoke('models:local'),
+    delete: (id) => ipcRenderer.invoke('models:delete', id),
+    reveal: (p) => ipcRenderer.invoke('models:reveal', p),
+  },
+  server: {
+    start: (opts) => ipcRenderer.invoke('server:start', opts),
+    stop: () => ipcRenderer.invoke('server:stop'),
+    state: () => ipcRenderer.invoke('server:state'),
+  },
+  dialog: {
+    pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+  },
+  shell: {
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+    showModels: () => ipcRenderer.invoke('shell:showModels'),
+  },
+  on: (channel, callback) => {
+    if (!ALLOWED_EVENTS.has(channel)) throw new Error(`Unerlaubter Event-Kanal: ${channel}`);
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+});

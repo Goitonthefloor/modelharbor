@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' file:; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: file:; font-src 'self' file:; connect-src http://127.0.0.1:* http://localhost:*">
+  <title>ModelHarbor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2.5 4 7v10l8 4.5 8-4.5V7l-8-4.5Z"></path>
+            <path d="M4 7l8 4.5L20 7M12 11.5v10"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-name">ModelHarbor</div>
+          <div class="brand-sub">Lokale KI-Modelle</div>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button class="nav-item is-active" data-view="chat">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 9 9 0 0 1-3.8-.8L3 21l1.9-5.7a8.3 8.3 0 0 1-.9-3.8A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z"></path></svg>
+          <span>Chat</span>
+        </button>
+        <button class="nav-item" data-view="models">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"></path><path d="M3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5"></path></svg>
+          <span>Modelle</span>
+        </button>
+        <button class="nav-item" data-view="setup">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"></path></svg>
+          <span>Einrichtung</span>
+        </button>
+      </nav>
+
+      <div class="side-foot" id="side-status">
+        <div class="side-hint">Hardware wird erkannt …</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ============ CHAT ============ -->
+      <section class="view is-active" id="view-chat">
+        <header class="topbar">
+          <div class="model-chip" id="chat-model-chip">
+            <span class="dot"></span>
+            <span id="chat-model-name">Kein Modell geladen</span>
+          </div>
+          <div class="topbar-spacer"></div>
+          <label class="preset-wrap">
+            <span class="preset-label">Preset</span>
+            <select id="preset-select" class="select"></select>
+          </label>
+          <button class="btn btn-ghost" id="btn-open-models">Modell wechseln</button>
+          <button class="btn btn-danger-ghost" id="btn-unload" title="Modell aus dem Speicher entladen">Entladen</button>
+        </header>
+
+        <div class="chat-scroll" id="chat-scroll">
+          <div class="messages" id="messages">
+            <div class="empty-state" id="chat-empty">
+              <div class="empty-icon">
+                <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 4 7v10l8 4.5 8-4.5V7l-8-4.5Z"></path><path d="M4 7l8 4.5L20 7M12 11.5v10"></path></svg>
+              </div>
+              <h2 id="empty-title">Noch kein Modell geladen</h2>
+              <p id="empty-text">Wähle ein Modell aus dem Katalog — ModelHarbor prüft vorher, ob es zu deiner Hardware passt.</p>
+              <button class="btn btn-primary" id="btn-empty-action">Modelle ansehen</button>
+            </div>
+          </div>
+        </div>
+
+        <footer class="composer" id="composer">
+          <div class="composer-box">
+            <textarea id="input" rows="1" placeholder="Nachricht schreiben … (Enter = senden, Shift+Enter = neue Zeile)" disabled></textarea>
+            <button class="btn btn-primary send-btn" id="btn-send" disabled>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4 20-7Z"></path></svg>
+            </button>
+          </div>
+          <div class="composer-meta">
+            <span id="composer-hint">Modell laden, um zu chatten</span>
+            <span id="token-info"></span>
+          </div>
+        </footer>
+      </section>
+
+      <!-- ============ MODELLE ============ -->
+      <section class="view" id="view-models">
+        <header class="page-head">
+          <div>
+            <h1>Modelle</h1>
+            <p class="page-sub" id="models-sub">Empfehlungen passend zu deiner Hardware</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-models-folder">Ordner öffnen</button>
+          </div>
+        </header>
+
+        <div class="tabs" id="models-tabs">
+          <button class="tab is-active" data-tab="catalog">Empfohlen</button>
+          <button class="tab" data-tab="search">HuggingFace durchsuchen</button>
+          <button class="tab" data-tab="local">Installiert <span class="tab-count" id="local-count"></span></button>
+        </div>
+
+        <div class="tab-body" id="tab-catalog">
+          <div class="grid" id="catalog-grid"></div>
+        </div>
+
+        <div class="tab-body is-hidden" id="tab-search">
+          <div class="searchbar">
+            <input type="search" id="search-input" class="input" placeholder="z. B. qwen3, llama 3.1, mistral, coder …">
+            <button class="btn btn-primary" id="btn-search">Suchen</button>
+          </div>
+          <div class="search-hint" id="search-hint">Durchsucht HuggingFace nach GGUF-Modellen, sortiert nach Downloads.</div>
+          <div class="list" id="search-results"></div>
+          <div class="file-panel is-hidden" id="file-panel">
+            <div class="file-panel-head">
+              <div>
+                <h3 id="file-panel-title"></h3>
+                <p class="muted" id="file-panel-sub"></p>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="file-panel-close">Schließen</button>
+            </div>
+            <div class="list" id="file-list"></div>
+          </div>
+        </div>
+
+        <div class="tab-body is-hidden" id="tab-local">
+          <div class="list" id="local-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ SETUP ============ -->
+      <section class="view" id="view-setup">
+        <header class="page-head">
+          <div>
+            <h1>Einrichtung</h1>
+            <p class="page-sub">Hardware prüfen, Backend wählen, Speicher festlegen</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-rescan">Neu erkennen</button>
+          </div>
+        </header>
+        <div id="setup-body"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-wrap" id="toast-wrap"></div>
+  <script src="app.js"></script>
+</body>
+</html>
