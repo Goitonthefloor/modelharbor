@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Steuert die laufende ModelHarbor-App über CDP (Playwright)."""
-import sys, json, time
+import sys, json, time, os
 from playwright.sync_api import sync_playwright
 
-SHOT = "/home/gregerr/workspace/modelharbor/.runtime/shots"
-import os
+SHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".runtime", "shots")
 os.makedirs(SHOT, exist_ok=True)
 
 def main():

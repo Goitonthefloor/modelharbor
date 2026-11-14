@@ -1,21 +1,170 @@
-MIT License
+MODELHARBOR LICENSE 1.0
+Free Use — Paid Distribution
+Copyright (c) 2026 Rolf Greger. All rights reserved.
 
-Copyright (c) 2026 Rolf Greger
+This is a source-available license. It is NOT an open-source license: it grants
+free use of the Software but reserves all rights of distribution to the Licensor.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+--------------------------------------------------------------------------------
+1. DEFINITIONS
+--------------------------------------------------------------------------------
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+"Software" means the ModelHarbor application and all accompanying source code,
+documentation, configuration files, build scripts, artwork and assets made
+available by the Licensor under this License, including any part thereof.
+
+"Licensor" means Rolf Greger, the copyright holder.
+
+"You" means any natural or legal person exercising rights under this License.
+
+"Use" means to install, execute, run and evaluate the Software, and to modify it
+for Your own internal purposes.
+
+"Distribution" means any act of making the Software or a derivative work
+available to any third party, in whole or in part, by any means, including but
+not limited to: publishing, uploading, mirroring, hosting, sharing, selling,
+renting, leasing, lending, licensing, sublicensing, bundling with other products,
+distributing as part of a package or appliance, or offering it as a service.
+
+--------------------------------------------------------------------------------
+2. FREE USE GRANT
+--------------------------------------------------------------------------------
+
+Subject to Sections 3 and 4, the Licensor grants You a worldwide, royalty-free,
+non-exclusive, non-transferable license to Use the Software without charge,
+including:
+
+  a) private, personal and educational use;
+  b) internal business use of any kind, including commercial use inside Your own
+     organization, on any number of devices;
+  c) evaluation, testing and benchmarking;
+  d) modification of the source code for Your own internal purposes.
+
+No registration, account or payment is required for Use.
+
+--------------------------------------------------------------------------------
+3. RESTRICTIONS
+--------------------------------------------------------------------------------
+
+Without a separate written distribution license from the Licensor (Section 4),
+You may NOT:
+
+  a) distribute, publish, upload, mirror, host or otherwise make the Software or
+     any derivative work available on any website, platform, app store, package
+     registry, repository, file host, forum, torrent or other channel;
+  b) sell, rent, lease, lend or otherwise commercially exploit the Software by
+     making it available to third parties;
+  c) offer the Software, or any functionality derived from it, as a hosted or
+     managed service (SaaS/PaaS), or include it in a product or appliance that is
+     delivered to third parties;
+  d) sublicense or transfer any of the rights granted under this License;
+  e) publish, distribute or otherwise share modified versions, patches or
+     derivative works;
+  f) remove, obscure or alter any copyright, license or attribution notices;
+  g) use the name "ModelHarbor" or the Licensor's name to endorse or promote
+     products derived from the Software without prior written permission.
+
+Cloning or downloading the source code for the purpose of Use under Section 2 is
+permitted. Any subsequent act of Distribution is not.
+
+--------------------------------------------------------------------------------
+4. DISTRIBUTION LICENSE AND FEES
+--------------------------------------------------------------------------------
+
+Distribution rights are available exclusively from the Licensor against a
+license fee. A distribution license is granted only in writing and may be
+subject to terms, scope and fee agreed individually.
+
+Requests: open an issue in this repository or contact the Licensor through the
+contact details published on the Licensor's GitHub profile. No distribution
+right is granted by implication, estoppel or otherwise.
+
+--------------------------------------------------------------------------------
+5. FORKS, MIRRORS AND PUBLIC COPIES
+--------------------------------------------------------------------------------
+
+The Licensor disables the hosting platform's fork feature for this repository.
+Regardless of technical settings, creating a public fork, mirror, copy or
+re-publication of the Software on any platform constitutes Distribution and is
+prohibited under Section 3(a).
+
+--------------------------------------------------------------------------------
+6. CONTRIBUTIONS
+--------------------------------------------------------------------------------
+
+By submitting a contribution (pull request, patch, issue attachment or similar),
+You grant the Licensor a perpetual, worldwide, royalty-free, irrevocable license
+to use, reproduce, modify, distribute and relicense that contribution as part of
+the Software. You confirm that You hold the rights necessary to grant this.
+
+--------------------------------------------------------------------------------
+7. NO TRADEMARK RIGHTS
+--------------------------------------------------------------------------------
+
+This License does not grant any rights to the trademarks, service marks, trade
+names or logos of the Licensor, except for nominative reference required to
+describe the origin of the Software.
+
+--------------------------------------------------------------------------------
+8. TERMINATION
+--------------------------------------------------------------------------------
+
+This License terminates automatically and without notice if You breach any of
+its terms. Upon termination You must cease all Use and delete all copies. Use by
+parties who received the Software in compliance with this License is not
+affected by termination of Your license.
+
+--------------------------------------------------------------------------------
+9. DISCLAIMER OF WARRANTY
+--------------------------------------------------------------------------------
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. THE ENTIRE RISK AS TO THE
+QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU.
+
+--------------------------------------------------------------------------------
+10. LIMITATION OF LIABILITY
+--------------------------------------------------------------------------------
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE, UNLESS CAUSED BY INTENT OR GROSS NEGLIGENCE. WHERE LIABILITY IS
+MANDATORY UNDER APPLICABLE LAW (E.G. PRODUCT LIABILITY, INJURY TO LIFE, BODY OR
+HEALTH), THE STATUTORY RULES APPLY.
+
+--------------------------------------------------------------------------------
+11. MISCELLANEOUS
+--------------------------------------------------------------------------------
+
+This License is governed by the laws of the Federal Republic of Germany,
+excluding its conflict-of-law rules and the UN Convention on Contracts for the
+International Sale of Goods. Place of jurisdiction is the Licensor's registered
+place of business, unless mandatory law provides otherwise.
+
+If any provision of this License is held invalid or unenforceable, the remaining
+provisions remain in full force and effect, and the invalid provision shall be
+replaced by a valid one that comes closest to its intended economic purpose.
+
+This License is the entire agreement concerning the Software and supersedes all
+prior or contemporaneous understandings.
+
+--------------------------------------------------------------------------------
+DEUTSCHE KURZFASSUNG (unverbindlich, maßgeblich ist der englische Text)
+--------------------------------------------------------------------------------
+
+- Nutzung gratis: privat, Bildung, und auch im Unternehmen (intern, beliebig
+  viele Geräte). Kein Konto, keine Registrierung, keine Gebühr.
+- Änderungen für den eigenen Bedarf sind erlaubt.
+- Nicht erlaubt ohne schriftliche Lizenz: Weitergabe, Veröffentlichen, Spiegeln,
+  Upload auf andere Seiten/Plattformen/App-Stores, Verkauf, Vermietung,
+  Bündelung mit Produkten, Betrieb als Dienst für Dritte, Unterlizenzierung.
+- Vertriebsrechte gibt es ausschließlich gegen Lizenzgebühr direkt beim
+  Lizenzgeber (Rolf Greger), schriftlich und projektbezogen.
+- Forks/öffentliche Kopien sind untersagt; die Fork-Funktion des Hosters ist
+  zusätzlich technisch abgeschaltet.
+- Gewährleistung und Haftung sind, soweit gesetzlich zulässig, ausgeschlossen.
+
+Kontakt für Lizenzanfragen: Issue im Repository oder Kontaktdaten im
+GitHub-Profil des Lizenzgebers.

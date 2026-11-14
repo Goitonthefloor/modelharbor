@@ -167,4 +167,24 @@ Schätzung (Unified Memory).
 
 ## Lizenz
 
-MIT — siehe `LICENSE`.
+**ModelHarbor License 1.0 — freie Nutzung, Vertrieb nur mit Lizenz.**
+
+| Erlaubt ohne Gebühr | Nur mit schriftlicher Lizenz (Gebühr) |
+|---|---|
+| Private, schulische und interne Nutzung | Weitergabe an Dritte |
+| Kommerzielle Nutzung **im eigenen** Unternehmen, beliebig viele Geräte | Veröffentlichen, Spiegeln, Upload auf andere Seiten, App-Stores, Paketquellen |
+| Ausprobieren, Testen, Benchmarking | Verkauf, Vermietung, Bündelung mit Produkten |
+| Änderungen für den eigenen Bedarf | Betrieb als Dienst für Dritte (SaaS/PaaS) |
+
+Forks und öffentliche Kopien sind untersagt; die Fork-Funktion dieses
+Repositories ist zusätzlich technisch abgeschaltet.
+
+Das ist bewusst **keine** Open-Source-Lizenz (nicht OSI-konform), sondern
+*source-available*. Der verbindliche Text steht in [`LICENSE`](LICENSE)
+(englisch, mit unverbindlicher deutscher Kurzfassung am Ende).
+
+Lizenzanfragen: Issue im Repository oder Kontaktdaten im GitHub-Profil.
+
+**Drittkomponenten** behalten ihre eigenen Lizenzen: Electron (MIT),
+llama.cpp (MIT, wird zur Laufzeit vom Nutzer geladen und nicht mitgeliefert),
+extract-zip (BSD-2-Clause), tar (ISC).

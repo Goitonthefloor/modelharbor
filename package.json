@@ -6,7 +6,7 @@
   "description": "Lokale KI-Chatmodelle mit einem Klick: Hardware-Erkennung, passende Modellvorschläge, HuggingFace-Download und fertige Presets.",
   "main": "electron/main.js",
   "author": "Rolf Greger",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
