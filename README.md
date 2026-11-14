@@ -4,6 +4,10 @@ Lokale KI-Chatmodelle mit einem Klick — ohne Terminal, ohne Cloud, ohne Konto.
 ModelHarbor erkennt die Hardware, wählt das passende llama.cpp-Backend, lädt Modelle
 direkt von HuggingFace und startet einen fertig konfigurierten Chat.
 
+> **Fertig gebaut?** Nein, musst du nicht: [**Releases**](https://github.com/Goitonthefloor/modelharbor/releases) →
+> `ModelHarbor-1.0.0.AppImage` (Linux x64) oder `ModelHarbor-Setup-1.0.0.exe` (Windows x64).
+> Aus dem Quellcode: `npm install && npm start`; Pakete bauen mit `npm run dist:linux` bzw. `npm run dist:win`.
+
 ```
 ┌──────────────┐   1. Hardware erkennen    ┌───────────────────────────┐
 │  ModelHarbor │ ────────────────────────► │ CPU / GPU / VRAM / NPU    │
