@@ -142,6 +142,15 @@ sofort wirkt.
 - Streaming-Chat per SSE direkt aus dem Renderer
 - Keine Telemetrie, keine Cloud-Aufrufe außer HuggingFace-Downloads und GitHub-Releases
 
+> **Sandbox-Hinweis (Linux-AppImage):** AppImages können das setuid-Binary für die
+> Chromium-Sandbox nicht mitliefern, deshalb startet das Paket mit `--no-sandbox`.
+> Das ist bei AppImage-Paketen üblich. Die App lädt ausschließlich lokale Dateien
+> (`file://`) und spricht nur mit dem selbst gestarteten `llama-server` auf
+> `127.0.0.1`. Wer die Sandbox will, baut `npm run dist:linux -- --dir` und startet
+> `dist/linux-unpacked/modelharbor` mit eigener `chrome-sandbox`. Die
+> Fensterzuordnung ist über `desktopName` + `syncDesktopName` gesetzt
+> (`StartupWMClass=modelharbor`).
+
 ## Fehlerbehebung
 
 **„Kein Backend installiert“** — Einrichtung öffnen und das empfohlene Backend installieren.
