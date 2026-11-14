@@ -6,8 +6,6 @@ ModelHarbor schaut, welche Hardware du hast, sucht das passende llama.cpp-Backen
 lädt Modelle direkt von HuggingFace und öffnet danach einen Chat, der schon passend
 eingestellt ist.
 
-
-
 ```
 ┌──────────────┐   1. Hardware erkennen     ┌───────────────────────────┐
 │  ModelHarbor │ ─────────────────────────► │ CPU / GPU / VRAM / NPU    │
@@ -45,6 +43,13 @@ eingestellt ist.
   zum letzten Stream-Delta, nicht geschätzt.
 - **Bedienung.** Stop-Button (oder `Esc`) während einer Antwort, Chatverlauf mit Kopieren
   und Neu generieren. Die Oberfläche ist deutsch und läuft nach dem ersten Download offline.
+- **Entladen & Neuladen.** Ein Klick auf **Entladen** gibt sofort Rückmeldung und räumt das
+  Modell aus dem Speicher. Danach wird der rote Button zum grünen **„Letztes Modell laden“** —
+  das zuletzt verwendete Modell ist damit mit einem Klick wieder da (inkl. Preset und GPU-Fit).
+- **Rundum bedienbar.** Die Modell-Tabs lassen sich mit den Pfeiltasten wechseln, der aktive
+  Tab hat einen deutlichen Unterstrich, und jede Aktion hat sichtbares Fokus- und
+  Druck-Feedback. Bestätigungen (Modell wechseln, Löschen, Backend entfernen) erscheinen als
+  eigene Dialoge, Meldungen als schließbare Hinweise, die auch Screenreader mitbekommen.
 
 ## Installation
 
@@ -52,9 +57,9 @@ Die fertigen Pakete liegen in `dist/`:
 
 | Plattform | Datei | Stand |
 |---|---|---|
-| Windows 10/11 (x64) | `dist/windows/ModelHarbor Setup 1.0.0.exe` | gebaut, Installation getestet (117 MB) |
-| Linux (x64) | `dist/ModelHarbor-1.0.0.AppImage` | gebaut, im Alltagsbetrieb getestet (121 MB) |
-| macOS (Apple Silicon / Intel) | `ModelHarbor-1.0.0-arm64.dmg` / `-x64.dmg` | bauen mit `npm run dist:mac` (auf einem Mac) |
+| Windows 10/11 (x64) | `dist/windows/ModelHarbor Setup 1.1.0.exe` | bauen mit `npm run dist:win` (Windows oder Wine; 1.0.0-Installer liegt bereit) |
+| Linux (x64) | `dist/ModelHarbor-1.1.0.AppImage` | gebaut, im Alltagsbetrieb getestet (121 MB) |
+| macOS (Apple Silicon / Intel) | `ModelHarbor-1.1.0-arm64.dmg` / `-x64.dmg` | bauen mit `npm run dist:mac` (auf einem Mac) |
 
 Beim ersten Start führt dich die App durch die Einrichtung: Hardware prüfen, Backend
 installieren, Modell auswählen.
@@ -72,11 +77,16 @@ Du brauchst Node.js ≥ 20 und npm.
 ```bash
 npm install
 npm start                 # Entwicklungsmodus
-npm test                  # Unit-Tests
+npm test                  # Backend-Unit-Tests (Hardware, Presets, Server-Args)
+python3 scripts/ui-smoke.py   # Renderer-Smoke-Test (braucht Playwright + Chromium)
 npm run dist:linux        # AppImage
 npm run dist:win          # NSIS-Installer
 npm run dist:mac          # DMG
 ```
+
+Der Renderer-Smoke-Test (`scripts/ui-smoke.py`) lädt die Oberfläche headless in Chromium,
+mockt die Electron-Bridge und prüft die wichtigsten Abläufe: Entladen → „Letztes Modell laden“,
+Toast-Meldungen, Tab-Navigation per Tastatur, Bestätigungsdialoge. Erwarteter Exit-Code: 0.
 
 Die Pakete landen in `dist/`. Windows- und macOS-Pakete baust du am besten auf dem jeweiligen
 System (oder in der CI). Cross-Builds von Linux nach Windows funktionieren nur mit Wine.
