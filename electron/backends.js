@@ -10,7 +10,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const https = require('https');
 const { pipeline } = require('stream/promises');
-const extractZip = require('extract-zip');
+const yauzl = require('yauzl');
 const tar = require('tar');
 
 const RELEASES_API = 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=25';
@@ -309,6 +309,56 @@ function availableBackends(hw, release) {
 
 /* --------------------------- Installation --------------------------- */
 
+/**
+ * Entpackt eine ZIP-Datei sicher: jeder Eintrag wird gegen das Zielverzeichnis
+ * geprüft (kein Traversal, keine absoluten Pfade), Symlinks werden abgelehnt.
+ * Ersetzt extract-zip 2.0.1, dessen Symlink-Behandlung CVEs aufwies
+ * (GHSA-7pqw-9j4j-h8q3, GHSA-jmr9-qjv8-65gv).
+ */
+async function extractZipSafe(zipPath, targetDir) {
+  const root = path.resolve(targetDir);
+  await fsp.mkdir(root, { recursive: true });
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+      zipfile.on('error', reject);
+      const fail = (e) => { try { zipfile.close(); } catch { /* ignore */ } reject(e); };
+      zipfile.readEntry();
+      zipfile.on('entry', (entry) => {
+        // Nur reguläre Dateien und Verzeichnisse; Symlinks und andere Typen ablehnen.
+        const mode = (entry.externalFileAttributes >>> 16) & 0xffff;
+        const isDir = (mode & 0o170000) === 0o040000 || /\/$/.test(entry.fileName);
+        const isSymlink = (mode & 0o170000) === 0o120000;
+        if (isSymlink) return fail(new Error(`Symlink im Archiv nicht erlaubt: ${entry.fileName}`));
+        // Pfad normalisieren und auf Containment prüfen.
+        const entryPath = entry.fileName.replace(/\\/g, '/');
+        const target = path.normalize(path.join(root, entryPath));
+        if (target !== root && !target.startsWith(root + path.sep)) {
+          return fail(new Error(`Archivpfad verlässt Zielverzeichnis: ${entry.fileName}`));
+        }
+        if (isDir) {
+          fsp.mkdir(target, { recursive: true })
+            .then(() => zipfile.readEntry())
+            .catch(fail);
+          return;
+        }
+        fsp.mkdir(path.dirname(target), { recursive: true })
+          .then(() => {
+            zipfile.openReadStream(entry, (sErr, readStream) => {
+              if (sErr) return fail(sErr);
+              const out = fs.createWriteStream(target);
+              out.on('error', fail);
+              readStream.on('error', fail);
+              readStream.pipe(out).on('close', () => zipfile.readEntry());
+            });
+          })
+          .catch(fail);
+      });
+      zipfile.on('end', () => resolve(targetDir));
+    });
+  });
+}
+
 async function findServerBinary(dir) {
   const names = process.platform === 'win32' ? ['llama-server.exe', 'llama-server'] : ['llama-server', 'llama-server.exe'];
   const results = [];
@@ -362,7 +412,7 @@ async function installBackend(backendId, { installRoot, onProgress = () => {} })
   for (const asset of assets) {
     const filePath = path.join(tmpDir, asset.name);
     if (/\.zip$/i.test(asset.name)) {
-      await extractZip(filePath, { dir: targetDir });
+      await extractZipSafe(filePath, targetDir);
     } else if (/\.tar\.gz$/i.test(asset.name) || /\.tgz$/i.test(asset.name)) {
       await tar.x({ file: filePath, cwd: targetDir, preservePaths: false });
     }
@@ -445,4 +495,5 @@ module.exports = {
   removeBackend,
   getJson,
   downloadToFile,
+  extractZipSafe,
 };

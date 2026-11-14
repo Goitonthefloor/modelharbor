@@ -211,4 +211,4 @@ am Ende gibt es eine unverbindliche deutsche Kurzfassung.
 Fragen zur Lizenz gern als Issue im Repository oder über die Kontaktdaten im GitHub-Profil.
 
 **Drittkomponenten** behalten ihre eigenen Lizenzen: Electron (MIT), llama.cpp (MIT; wird zur
-Laufzeit vom Nutzer geladen und nicht mitgeliefert), extract-zip (BSD-2-Clause), tar (ISC).
+Laufzeit vom Nutzer geladen und nicht mitgeliefert), yauzl (MIT), tar (ISC).
