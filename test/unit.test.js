@@ -172,3 +172,26 @@ test('buildArgs: Overrides überschreiben Preset-Sampling', () => {
   assert.equal(sampling.temp, 0.1);
   assert.equal(sampling.topP, 0.92); // Rest bleibt vom Preset
 });
+
+/* --- Asset-Matching gegen echte llama.cpp-Release-Namen ------------- */
+
+test('cudart-Asset wird mit und ohne Build-Nummer im Namen erkannt', () => {
+  const { BACKENDS } = require('../electron/backends.js');
+  const cases = [
+    ['win-cuda-12.4', ['cudart-llama-bin-win-cuda-12.4-x64.zip', 'cudart-llama-b12374-bin-win-cuda-12.4-x64.zip']],
+    ['win-cuda-13.5', ['cudart-llama-bin-win-cuda-13.5-x64.zip', 'cudart-llama-b12374-bin-win-cuda-13.5-x64.zip']],
+    ['linux-cuda-12.8', ['cudart-llama-bin-ubuntu-cuda-12.8-x64.tar.gz', 'cudart-llama-b12374-bin-ubuntu-cuda-12.8-x64.tar.gz']],
+  ];
+  for (const [id, names] of cases) {
+    const rule = BACKENDS[id].assets.find((a) => /cudart/.test(String(a.match)));
+    assert.ok(rule, `${id} hat keine cudart-Regel`);
+    for (const n of names) assert.ok(rule.match.test(n), `${id} erkennt ${n} nicht`);
+  }
+});
+
+test('cudart-Regel verwechselt keine fremden Pakete', () => {
+  const { BACKENDS } = require('../electron/backends.js');
+  const rule = BACKENDS['win-cuda-12.4'].assets.find((a) => /cudart/.test(String(a.match)));
+  assert.equal(rule.match.test('cudart-llama-bin-win-cuda-13.5-x64.zip'), false);
+  assert.equal(rule.match.test('llama-b12374-bin-win-cuda-12.4-x64.zip'), false);
+});

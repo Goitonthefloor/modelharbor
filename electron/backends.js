@@ -22,7 +22,7 @@ const BACKENDS = {
     platform: 'win32', arch: 'x64',
     assets: [
       { match: /^llama-.*-bin-win-cuda-12\.4-x64\.zip$/i, required: true },
-      { match: /^cudart-llama-.*-bin-win-cuda-12\.4-x64\.zip$/i, required: false },
+      { match: /^cudart-llama.*-bin-win-cuda-12\.4-x64\.zip$/i, required: false },
     ],
     note: 'Schnellster Weg für NVIDIA auf Windows. Benötigt aktuellen NVIDIA-Treiber.',
   },
@@ -31,7 +31,7 @@ const BACKENDS = {
     platform: 'win32', arch: 'x64',
     assets: [
       { match: /^llama-.*-bin-win-cuda-13\.5-x64\.zip$/i, required: true },
-      { match: /^cudart-llama-.*-bin-win-cuda-13\.5-x64\.zip$/i, required: false },
+      { match: /^cudart-llama.*-bin-win-cuda-13\.5-x64\.zip$/i, required: false },
     ],
     note: 'Neueste CUDA-Version — nur mit sehr aktuellem Treiber sinnvoll.',
   },
@@ -92,7 +92,7 @@ const BACKENDS = {
     platform: 'linux', arch: 'x64',
     assets: [
       { match: /^llama-.*-bin-ubuntu-cuda-12\.8-x64\.tar\.gz$/i, required: true },
-      { match: /^cudart-llama-.*-bin-ubuntu-cuda-12\.8-x64\.tar\.gz$/i, required: false },
+      { match: /^cudart-llama.*-bin-ubuntu-cuda-12\.8-x64\.tar\.gz$/i, required: false },
     ],
     note: 'Schnellster Weg für NVIDIA unter Linux.',
   },
