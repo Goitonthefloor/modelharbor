@@ -6,11 +6,7 @@ ModelHarbor schaut, welche Hardware du hast, sucht das passende llama.cpp-Backen
 lädt Modelle direkt von HuggingFace und öffnet danach einen Chat, der schon passend
 eingestellt ist.
 
-> **Keine Lust zu bauen?** Dann nimm die fertigen Pakete von der
-> [Releases-Seite](https://github.com/Goitonthefloor/modelharbor/releases):
-> `ModelHarbor-1.0.0.AppImage` für Linux (x64) oder `ModelHarbor-Setup-1.0.0.exe` für Windows (x64).
-> Wer aus dem Quellcode starten will: `npm install && npm start`. Pakete baust du mit
-> `npm run dist:linux` bzw. `npm run dist:win`.
+
 
 ```
 ┌──────────────┐   1. Hardware erkennen     ┌───────────────────────────┐
