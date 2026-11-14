@@ -313,6 +313,8 @@ async function runCompletion() {
   let reasoning = '';
   let usage = null;
   let lastRender = 0;
+  let tFirstToken = 0; // performance.now() beim ersten Delta
+  let tLastToken = 0;  // performance.now() beim letzten Delta
   const paint = (force) => {
     const now = Date.now();
     if (!force && now - lastRender < 55) return;
@@ -366,6 +368,11 @@ async function runCompletion() {
         const ch = json.choices && json.choices[0];
         const d = ch && ch.delta ? ch.delta : {};
         // Denk-Modelle (Qwen3, R1-Distill) liefern zusätzlich reasoning_content
+        if (d.reasoning_content || d.content) {
+          const now = performance.now();
+          if (!tFirstToken) tFirstToken = now;
+          tLastToken = now;
+        }
         if (d.reasoning_content) { reasoning += d.reasoning_content; paint(false); }
         if (d.content) { full += d.content; paint(false); }
       }
@@ -374,7 +381,12 @@ async function runCompletion() {
     state.chat.messages.push({ role: 'assistant', content: full, reasoning: reasoning || null });
     body.innerHTML = (reasoning ? reasoningBlock(reasoning) : '') + renderMarkdown(full);
     if (usage) {
-      $('#token-info').textContent = `${usage.prompt_tokens || 0} Prompt-Token · ${usage.completion_tokens || 0} Antwort-Token`;
+      const n = usage.completion_tokens || 0;
+      const genMs = tFirstToken && tLastToken > tFirstToken ? tLastToken - tFirstToken : 0;
+      const tps = tokensPerSecond(n, genMs);
+      const tpsText = tps ? ` · ${tps.toFixed(1)} tok/s` : '';
+      $('#token-info').textContent =
+        `${usage.prompt_tokens || 0} Prompt-Token · ${n} Antwort-Token${tpsText}`;
     }
     addMsgActions(el, full);
   } catch (e) {

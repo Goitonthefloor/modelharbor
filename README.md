@@ -44,6 +44,9 @@ eingestellt ist.
   läuft der Chat ehrlich über GPU oder CPU.
 - **Denkmodelle.** Modelle wie Qwen3 zeigen ihren `reasoning_content` als aufklappbaren
   Gedankengang, die eigentliche Antwort bleibt davon getrennt.
+- **Tempo-Anzeige.** Nach jeder Antwort stehen unter dem Chat die Prompt-Token, die
+  Antwort-Token und die tatsächlich erreichte Rate in `tok/s` — gemessen vom ersten bis
+  zum letzten Stream-Delta, nicht geschätzt.
 - **Bedienung.** Stop-Button (oder `Esc`) während einer Antwort, Chatverlauf mit Kopieren
   und Neu generieren. Die Oberfläche ist deutsch und läuft nach dem ersten Download offline.
 

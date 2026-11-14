@@ -195,3 +195,32 @@ test('cudart-Regel verwechselt keine fremden Pakete', () => {
   assert.equal(rule.match.test('cudart-llama-bin-win-cuda-13.5-x64.zip'), false);
   assert.equal(rule.match.test('llama-b12374-bin-win-cuda-12.4-x64.zip'), false);
 });
+
+/* ---------------- Token-Geschwindigkeit ---------------- */
+
+const { tokensPerSecond } = require('../ui/tokenspeed');
+
+test('tok/s: 100 Antwort-Tokens in 10 s ergeben 9,9 tok/s', () => {
+  assert.equal(Number(tokensPerSecond(100, 10000).toFixed(1)), 9.9);
+});
+
+test('tok/s: 2 Tokens in 1 s ergeben 1,0 tok/s', () => {
+  assert.equal(tokensPerSecond(2, 1000), 1);
+});
+
+test('tok/s: GPU-Messung 112 Tokens in 1 s ergibt 111 tok/s', () => {
+  assert.equal(Math.round(tokensPerSecond(112, 1000)), 111);
+});
+
+test('tok/s: Messfenster unter 250 ms wird verworfen, ab 250 ms akzeptiert', () => {
+  assert.equal(tokensPerSecond(50, 249), 0);
+  assert.ok(tokensPerSecond(50, 250) > 0);
+});
+
+test('tok/s: unter 2 Tokens oder ungültige Eingaben ergeben 0', () => {
+  assert.equal(tokensPerSecond(1, 5000), 0);
+  assert.equal(tokensPerSecond(0, 5000), 0);
+  assert.equal(tokensPerSecond(NaN, 5000), 0);
+  assert.equal(tokensPerSecond(50, NaN), 0);
+  assert.equal(tokensPerSecond(50, undefined), 0);
+});
