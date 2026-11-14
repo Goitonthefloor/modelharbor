@@ -141,6 +141,7 @@
             <p class="page-sub">Hardware prüfen, Backend wählen, Speicher festlegen</p>
           </div>
           <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-check-update">Nach Updates suchen</button>
             <button class="btn btn-ghost" id="btn-rescan">Neu erkennen</button>
           </div>
         </header>
@@ -159,6 +160,31 @@
       <form method="dialog" class="dialog-actions">
         <button type="submit" value="cancel" class="btn btn-ghost" id="confirm-cancel" autofocus>Abbrechen</button>
         <button type="submit" value="ok" class="btn btn-primary" id="confirm-ok">Bestätigen</button>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="update-dialog" aria-labelledby="update-title">
+    <div class="dialog-body">
+      <div class="update-head">
+        <div class="update-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+        </div>
+        <div>
+          <h2 id="update-title">Update verfügbar</h2>
+          <p class="update-sub" id="update-sub"></p>
+        </div>
+      </div>
+      <p class="update-notes" id="update-notes"></p>
+      <div class="update-progress is-hidden" id="update-progress">
+        <div class="progress"><div class="progress-fill" id="update-progress-fill"></div></div>
+        <div class="progress-label"><span id="update-progress-text">Wird heruntergeladen …</span><span id="update-progress-pct">0 %</span></div>
+      </div>
+      <form method="dialog" class="dialog-actions" id="update-actions">
+        <button type="submit" value="later" class="btn btn-ghost" id="update-later">Später</button>
+        <button type="submit" value="releases" class="btn btn-ghost is-hidden" id="update-releases">Zur Releases-Seite</button>
+        <button type="submit" value="open" class="btn btn-primary is-hidden" id="update-open">Datei öffnen</button>
+        <button type="button" class="btn btn-primary" id="update-now">Jetzt aktualisieren</button>
       </form>
     </div>
   </dialog>

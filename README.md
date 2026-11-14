@@ -50,6 +50,11 @@ eingestellt ist.
   Tab hat einen deutlichen Unterstrich, und jede Aktion hat sichtbares Fokus- und
   Druck-Feedback. Bestätigungen (Modell wechseln, Löschen, Backend entfernen) erscheinen als
   eigene Dialoge, Meldungen als schließbare Hinweise, die auch Screenreader mitbekommen.
+- **Auto-Update.** Beim Start prüft die App still gegen die GitHub-Releases, ob eine neuere
+  Version da ist. Wenn ja, fragt ein Dialog: **Jetzt aktualisieren** lädt das passende Paket
+  (AppImage/Installer) direkt herunter — eine Statusleiste zeigt den Fortschritt — und du
+  öffnest die Datei anschließend mit einem Klick. Ohne Update keine Unterbrechung. In der
+  Einrichtung geht auch ein manueller Check („Nach Updates suchen“).
 
 ## Installation
 
@@ -156,6 +161,9 @@ die Hauptparameter bei jeder Anfrage neu. So wirkt ein Presetwechsel sofort.
 - **llama-server** läuft als lokaler Prozess und stellt eine OpenAI-kompatible API auf
   `127.0.0.1` bereit.
 - Der Chat streamt per SSE direkt aus dem Renderer.
+- **Updates** kommen von den GitHub-Releases (`Goitonthefloor/modelharbor`): semver-Vergleich
+  im Hauptprozess, Download des plattformpassenden Pakets mit Fortschritts-Status. Der Check
+  ist ein stiller `GET /repos/…/releases/latest` — ohne Konto, ohne Telemetrie.
 - Keine Telemetrie. Außer HuggingFace und GitHub-Releases gibt es keine Cloud-Aufrufe.
 
 > **Sandbox-Hinweis (Linux-AppImage):** Ein AppImage kann das setuid-Binary für die

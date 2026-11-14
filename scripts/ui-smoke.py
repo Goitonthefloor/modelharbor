@@ -42,6 +42,12 @@ window.api = {
   },
   shell: { showModels: async () => ({}), openExternal: async () => ({}) },
   dialog: { pickFolder: async () => null },
+  update: {
+    check: async () => ({ updateAvailable: false, latest: { tag: 'v1.1.0' } }),
+    download: async () => { await new Promise((r) => setTimeout(r, 600)); return { assetPath: '/tmp/mh-update.AppImage', size: 1048576 }; },
+    openFile: async () => ({}),
+    openReleases: async () => ({}),
+  },
   on: () => {},
 };
 """
@@ -186,6 +192,67 @@ with sync_playwright() as p:
       return { inputDisabled: i.disabled, sendDisabled: s.disabled };
     }""")
     check("Composer ohne Modell deaktiviert", composer["inputDisabled"] and composer["sendDisabled"], json.dumps(composer))
+
+    # 11) Update-Dialog: update:available-Event öffnet Dialog mit Version + Notes
+    page.evaluate("""() => {
+      const info = {
+        updateAvailable: true, currentVersion: '1.0.0',
+        latest: { tag: 'v2.0.0', name: 'ModelHarbor 2.0.0', body: 'Ein grosses Update mit vielen Neuerungen.', assets: [{ name: 'ModelHarbor-2.0.0.AppImage', url: 'https://x', size: 5 }] },
+        asset: { name: 'ModelHarbor-2.0.0.AppImage', url: 'https://x', size: 5 },
+      };
+      showUpdateDialog(info);
+    }""")
+    page.wait_for_timeout(150)
+    upd_dlg = page.evaluate("""() => {
+      const d = document.querySelector('#update-dialog');
+      return { open: d.open, sub: document.querySelector('#update-sub').textContent,
+               notes: document.querySelector('#update-notes').textContent,
+               nowHidden: document.querySelector('#update-now').classList.contains('is-hidden'),
+               progressHidden: document.querySelector('#update-progress').classList.contains('is-hidden') };
+    }""")
+    check("Update-Dialog: öffnet mit Version + Notes",
+          upd_dlg["open"] and "2.0.0" in upd_dlg["sub"] and "viel" in upd_dlg["notes"] and not upd_dlg["nowHidden"] and upd_dlg["progressHidden"],
+          json.dumps(upd_dlg, ensure_ascii=False))
+
+    # 12) Download starten: Leiste sichtbar, Progress simuliert die füllende Leiste
+    # Wichtig: ; true statt Promise-Rückgabe — sonst wartet page.evaluate auf den ganzen Download
+    page.evaluate("startUpdateDownload(); true")
+    page.wait_for_timeout(120)
+    page.evaluate("""() => {
+      const p = { phase: 'download', percent: 42, doneBytes: 440401, totalBytes: 1048576 };
+      const fill = document.querySelector('#update-progress-fill');
+      fill.style.width = p.percent + '%';
+      document.querySelector('#update-progress-pct').textContent = '42 %';
+      document.querySelector('#update-progress-text').textContent = '0,4 MB von 1,0 MB';
+    }""")
+    page.wait_for_timeout(100)
+    upd_prog = page.evaluate("""() => {
+      const fill = document.querySelector('#update-progress-fill');
+      return { width: fill.style.width, pct: document.querySelector('#update-progress-pct').textContent,
+               txt: document.querySelector('#update-progress-text').textContent,
+               progressVisible: !document.querySelector('#update-progress').classList.contains('is-hidden') };
+    }""")
+    check("Update-Fortschritt: Balken füllt sich", upd_prog["width"] == "42%" and upd_prog["pct"] == "42 %" and upd_prog["progressVisible"], json.dumps(upd_prog, ensure_ascii=False))
+
+    # 13) Download abschließen: Open-Button erscheint, Jetzt-aktualisieren verschwindet
+    page.wait_for_timeout(700)
+    upd_done = page.evaluate("""() => {
+      const now = document.querySelector('#update-now');
+      const open = document.querySelector('#update-open');
+      const later = document.querySelector('#update-later');
+      return { nowHidden: now.classList.contains('is-hidden'), openVisible: !open.classList.contains('is-hidden'),
+               laterText: later.textContent, width: document.querySelector('#update-progress-fill').style.width };
+    }""")
+    check("Update fertig: Open-Button + 100 %", upd_done["nowHidden"] and upd_done["openVisible"] and upd_done["laterText"] == "Schließen" and upd_done["width"] == "100%", json.dumps(upd_done, ensure_ascii=False))
+
+    # 14) Manueller Check ohne Update: Toast 'Du bist aktuell'
+    page.evaluate("""() => {
+      state.info = { version: '1.1.0' };
+      document.querySelector('#btn-check-update').click();
+    }""")
+    page.wait_for_timeout(200)
+    upd_check = page.evaluate("[...document.querySelectorAll('#toast-wrap .toast-msg')].map(t => t.textContent)")
+    check("Manueller Check: 'Du bist aktuell'-Toast", any("aktuell" in t for t in upd_check), str(upd_check))
 
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))

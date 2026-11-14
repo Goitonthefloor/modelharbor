@@ -141,6 +141,75 @@ function confirmDialog({ title, message, okLabel = 'Bestätigen', danger = false
   });
 }
 
+/* --------------------------- Update --------------------------- */
+
+const stateUpdate = {
+  info: null,
+  downloading: false,
+  progress: null,
+  assetPath: null,
+};
+
+function showUpdateDialog(info) {
+  if (!info || !info.latest) return;
+  stateUpdate.info = info;
+  stateUpdate.downloading = false;
+  stateUpdate.progress = null;
+  stateUpdate.assetPath = null;
+  const dlg = $('#update-dialog');
+  const ver = info.latest.tag.replace(/^v/i, '');
+  $('#update-sub').textContent = `Version ${ver} ist verfügbar — du hast ${info.currentVersion || 'diese Version'}.`;
+  const notes = (info.latest.body || '').trim();
+  $('#update-notes').textContent = notes || 'Release-Notes findest du auf der Releases-Seite.';
+  $('#update-notes').style.display = notes ? '' : 'none';
+  $('#update-progress').classList.add('is-hidden');
+  $('#update-progress-fill').style.width = '0%';
+  $('#update-progress-text').textContent = 'Wird heruntergeladen …';
+  $('#update-progress-pct').textContent = '0 %';
+  const noAsset = !info.asset;
+  $('#update-now').classList.toggle('is-hidden', noAsset);
+  $('#update-open').classList.add('is-hidden');
+  $('#update-later').classList.toggle('is-hidden', false);
+  $('#update-later').disabled = false;
+  $('#update-later').textContent = noAsset ? 'Schließen' : 'Später';
+  $('#update-releases').classList.toggle('is-hidden', false);
+  dlg.returnValue = '';
+  dlg.showModal();
+}
+
+async function startUpdateDownload() {
+  const info = stateUpdate.info;
+  if (!info || !info.asset || stateUpdate.downloading) return;
+  stateUpdate.downloading = true;
+  const now = $('#update-now');
+  const later = $('#update-later');
+  now.disabled = true;
+  now.textContent = 'Lädt …';
+  later.disabled = true;
+  $('#update-progress').classList.remove('is-hidden');
+  try {
+    const res = await bridge.update.download(info.asset.url, info.asset.name);
+    stateUpdate.assetPath = res.assetPath;
+    stateUpdate.downloading = false;
+    $('#update-progress-fill').style.width = '100%';
+    $('#update-progress-text').textContent = `Fertig: ${info.asset.name}`;
+    $('#update-progress-pct').textContent = fmtGB(res.size);
+    now.classList.add('is-hidden');
+    const open = $('#update-open');
+    open.classList.remove('is-hidden');
+    open.disabled = false;
+    later.disabled = false;
+    later.textContent = 'Schließen';
+  } catch (e) {
+    stateUpdate.downloading = false;
+    now.disabled = false;
+    now.textContent = 'Erneut versuchen';
+    later.disabled = false;
+    $('#update-progress').classList.add('is-hidden');
+    toast(`Download fehlgeschlagen: ${e.message}`, 'error', 9000);
+  }
+}
+
 function fitBadge(fit) {
   if (!fit) return '';
   const cls = fit.verdict === 'gpu' ? 'badge-gpu' : fit.verdict === 'hybrid' ? 'badge-hybrid' : fit.verdict === 'ram' ? 'badge-ram' : 'badge-big';
@@ -898,6 +967,25 @@ function bindEvents() {
     }
   });
   $('#btn-models-folder').addEventListener('click', () => bridge.shell.showModels());
+  $('#btn-check-update').addEventListener('click', async () => {
+    try {
+      const info = await bridge.update.check();
+      if (info.updateAvailable) showUpdateDialog({ ...info, currentVersion: state.info?.version });
+      else toast(`Du bist aktuell (v${state.info?.version || '?'}).`, 'ok', 2600);
+    } catch (e) {
+      toast(`Update-Check fehlgeschlagen: ${e.message}`, 'error', 6000);
+    }
+  });
+  $('#update-now').addEventListener('click', startUpdateDownload);
+  $('#update-dialog').addEventListener('close', () => {
+    const val = $('#update-dialog').returnValue;
+    $('#update-dialog').returnValue = '';
+    if (val === 'open' && stateUpdate.assetPath) {
+      bridge.update.openFile(stateUpdate.assetPath).catch((e) => toast(e.message, 'error'));
+    } else if (val === 'releases') {
+      bridge.update.openReleases();
+    }
+  });
   $('#btn-rescan').addEventListener('click', async () => {
     toast('Erkenne Hardware neu …', 'info', 1800);
     state.hw = await bridge.hw.scan(true);
@@ -1093,6 +1181,24 @@ function bindEvents() {
     if (!p || !p.backend) return;
     state.backendInstalls.set(p.backend, p);
     if (state.view === 'setup') renderSetup();
+  });
+
+  bridge.on('update:available', (info) => {
+    if (info && info.updateAvailable) showUpdateDialog({ ...info, currentVersion: state.info?.version });
+  });
+
+  bridge.on('update:progress', (p) => {
+    if (!p) return;
+    const fill = $('#update-progress-fill');
+    if (!fill) return;
+    const pct = Math.max(0, Math.min(100, p.percent || 0));
+    fill.style.width = `${pct}%`;
+    const pctEl = $('#update-progress-pct');
+    if (pctEl) pctEl.textContent = `${pct.toFixed(pct < 10 ? 1 : 0).replace('.', ',')} %`;
+    const txt = $('#update-progress-text');
+    if (txt) {
+      txt.textContent = p.doneBytes ? `${fmtGB(p.doneBytes)} von ${fmtGB(p.totalBytes)}` : 'Wird heruntergeladen …';
+    }
   });
 
   bridge.on('server:log', (entry) => {

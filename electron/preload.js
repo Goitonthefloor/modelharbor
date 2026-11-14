@@ -6,6 +6,8 @@ const ALLOWED_EVENTS = new Set([
   'backend:progress',
   'server:log',
   'server:state',
+  'update:available',
+  'update:progress',
 ]);
 
 contextBridge.exposeInMainWorld('api', {
@@ -43,6 +45,12 @@ contextBridge.exposeInMainWorld('api', {
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
     showModels: () => ipcRenderer.invoke('shell:showModels'),
+  },
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: (url, name) => ipcRenderer.invoke('update:download', { url, name }),
+    openFile: (filePath) => ipcRenderer.invoke('update:openFile', filePath),
+    openReleases: () => ipcRenderer.invoke('update:openReleases'),
   },
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) throw new Error(`Unerlaubter Event-Kanal: ${channel}`);

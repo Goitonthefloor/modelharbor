@@ -8,6 +8,7 @@ const hardware = require('./hardware');
 const backends = require('./backends');
 const models = require('./models');
 const server = require('./server');
+const updater = require('./updater');
 const { PRESETS } = require('./presets');
 
 const isDev = !app.isPackaged;
@@ -265,6 +266,34 @@ function registerIpc() {
     return settings.modelsDir;
   });
 
+  // Update-Check gegen GitHub-Releases
+  ipcMain.handle('update:check', async () =>
+    updater.checkForUpdate({ currentVersion: app.getVersion(), platform: process.platform }));
+
+  ipcMain.handle('update:download', async (_e, { url, name }) => {
+    if (activeUpdate) throw new Error('Ein Update-Download läuft bereits.');
+    activeUpdate = { startedAt: Date.now() };
+    const onProgress = throttle((p) => send('update:progress', p), 150);
+    try {
+      const dest = path.join(userDataDir(), 'downloads', name || 'modelharbor-update');
+      const result = await updater.downloadFile(url, dest, onProgress);
+      return { ...result, assetPath: dest };
+    } finally {
+      activeUpdate = null;
+    }
+  });
+
+  ipcMain.handle('update:openFile', async (_e, filePath) => {
+    const err = await shell.openPath(filePath);
+    if (err) throw new Error(err);
+    return true;
+  });
+
+  ipcMain.handle('update:openReleases', async () => {
+    shell.openExternal('https://github.com/Goitonthefloor/modelharbor/releases');
+    return true;
+  });
+
   // Server-Events an den Renderer weiterreichen
   server.on('log', (entry) => send('server:log', entry));
   server.on('state', (st) => send('server:state', st));
@@ -288,6 +317,13 @@ if (!gotLock) {
     registerIpc();
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
     createWindow();
+    // Automatischer Update-Check kurz nach dem Start (still, wenn aktuell)
+    setTimeout(async () => {
+      try {
+        const info = await updater.checkForUpdate({ currentVersion: app.getVersion(), platform: process.platform });
+        if (info.updateAvailable) send('update:available', info);
+      } catch { /* Netzwerk/API-Probleme: still ignorieren */ }
+    }, 4000);
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

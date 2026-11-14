@@ -224,3 +224,39 @@ test('tok/s: unter 2 Tokens oder ungültige Eingaben ergeben 0', () => {
   assert.equal(tokensPerSecond(50, NaN), 0);
   assert.equal(tokensPerSecond(50, undefined), 0);
 });
+
+/* ---------------- Update-Checker ---------------- */
+
+const { parseVersion, isNewerVersion, pickAsset } = require('../electron/updater');
+
+test('parseVersion: v-Präfix und reine Zahlen', () => {
+  assert.deepEqual(parseVersion('v1.2.3'), { major: 1, minor: 2, patch: 3 });
+  assert.deepEqual(parseVersion('1.2.3'), { major: 1, minor: 2, patch: 3 });
+  assert.equal(parseVersion('abc'), null);
+});
+
+test('isNewerVersion: Semver-Vergleich', () => {
+  assert.ok(isNewerVersion('v1.1.0', '1.0.0'));
+  assert.ok(isNewerVersion('1.2.0', '1.1.9'));
+  assert.ok(isNewerVersion('2.0.0', '1.9.9'));
+  assert.ok(!isNewerVersion('1.1.0', '1.1.0'));
+  assert.ok(!isNewerVersion('1.0.0', '1.1.0'));
+  assert.ok(!isNewerVersion('garbage', '1.1.0'));
+});
+
+test('pickAsset: plattformspezifische Pakete', () => {
+  const assets = [
+    { name: 'ModelHarbor-Setup-1.1.0.exe', url: 'x' },
+    { name: 'ModelHarbor-1.1.0.AppImage', url: 'y' },
+    { name: 'ModelHarbor-1.1.0-arm64.dmg', url: 'z' },
+  ];
+  assert.equal(pickAsset(assets, 'linux').name, 'ModelHarbor-1.1.0.AppImage');
+  assert.equal(pickAsset(assets, 'win32').name, 'ModelHarbor-Setup-1.1.0.exe');
+  assert.equal(pickAsset(assets, 'darwin').name, 'ModelHarbor-1.1.0-arm64.dmg');
+  assert.equal(pickAsset(assets, 'linux'), pickAsset(assets, 'unknown-platform'));
+});
+
+test('pickAsset: kein passendes Asset liefert null', () => {
+  assert.equal(pickAsset([{ name: 'readme.txt' }], 'linux'), null);
+  assert.equal(pickAsset([], 'linux'), null);
+});
