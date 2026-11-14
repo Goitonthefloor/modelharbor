@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""ModelHarbor UI-Smoke-Test: laedt ui/index.html mit gemocktem window.api in Chromium.
+
+Voraussetzung: Playwright + Chromium (z. B. venv mit `pip install playwright`).
+Ausfuehrung:   python3 scripts/ui-smoke.py   (erwartet Exit-Code 0)
+Deckt ab: Toast-Popover (Close, Stacking), Entladen->gruener 'Letztes Modell laden'-
+Button -> Neuladen, Tabs (aria-selected, Pfeiltasten), natives confirmDialog, Composer-State.
+"""
+import sys, json
+from playwright.sync_api import sync_playwright
+
+URL = "file:///home/gregerr/workspace/modelharbor/ui/index.html"
+
+API_MOCK = """
+window.__apiCalls = [];
+window.api = {
+  info: async () => ({ version: '1.0.0', name: 'ModelHarbor' }),
+  settings: {
+    get: async () => ({ modelsDir: '/tmp/models', ctx: 8192, gpuLayers: 999, lastPreset: 'balanced' }),
+    set: async (p) => ({ modelsDir: '/tmp/models', ctx: 8192, gpuLayers: 999, lastPreset: 'balanced', ...p }),
+  },
+  presets: async () => ([{ id: 'balanced', name: 'Balanced', icon: '⚖', description: 'Standard', systemPrompt: '', sampling: {} }]),
+  server: {
+    state: async () => ({ running: false }),
+    start: async (o) => { window.__apiCalls.push(['start', o]); return { port: 9931, preset: o.preset }; },
+    stop: async () => { window.__apiCalls.push(['stop']); return { stopped: true }; },
+  },
+  hw: { scan: async () => ({ osName: 'Linux', arch: 'x64', cpuModel: 'Test CPU', cpuCores: 8, totalMemGB: 16, freeMemGB: 10, gpus: [], npus: [], recommendation: { primary: null, candidates: [] } }) },
+  models: {
+    catalog: async () => [],
+    local: async () => ([{ id: 'm1', repo: 'test/model', file: 'model.Q4_K_M.gguf', sizeLabel: '4.2 GB', path: '/tmp/models/model.Q4_K_M.gguf', quant: 'Q4_K_M', fit: { verdict: 'gpu', label: 'GPU', detail: 'Passt zur GPU', gpuLayers: 32 } }]),
+    search: async () => [],
+    files: async () => ({ files: [], downloads: 0 }),
+    download: async () => ({}),
+    delete: async () => ({}),
+    reveal: async () => ({}),
+  },
+  backends: {
+    list: async () => ({ available: [], installed: [{ id: 'linux-cpu', label: 'CPU' }], release: { tag: 'b1' } }),
+    install: async () => ({}),
+    remove: async () => ({}),
+  },
+  shell: { showModels: async () => ({}), openExternal: async () => ({}) },
+  dialog: { pickFolder: async () => null },
+  on: () => {},
+};
+"""
+
+results = []
+def check(name, ok, detail=""):
+    results.append((name, ok, detail))
+    print(("PASS" if ok else "FAIL"), name, ("- " + detail if detail else ""))
+
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
+    page.add_init_script(API_MOCK)
+    page.goto(URL)
+    page.wait_for_function("document.querySelector('#side-status') && document.querySelector('#side-status').textContent.includes('Backend')", timeout=10000)
+    page.wait_for_timeout(300)
+
+    # 1) Boot: kein Modell -> Entladen-Button disabled
+    btn_state = page.evaluate("""() => {
+      const b = document.querySelector('#btn-unload');
+      return { cls: b.className, disabled: b.disabled, text: b.textContent.trim() };
+    }""")
+    check("Boot: roter Entladen-Button disabled", "btn-danger-ghost" in btn_state["cls"] and btn_state["disabled"] and "Entladen" in btn_state["text"], json.dumps(btn_state, ensure_ascii=False))
+
+    # 2) Toast: popover, sichtbar, Close-Button
+    page.evaluate("toast('Testmeldung ok', 'ok', 6000)")
+    page.wait_for_timeout(150)
+    toast_ok = page.evaluate("""() => {
+      const t = document.querySelector('#toast-wrap .toast');
+      return t && t.matches(':popover-open') && t.querySelector('.toast-close') && t.querySelector('.toast-msg').textContent === 'Testmeldung ok';
+    }""")
+    check("Toast: popover offen + Close-Button + Text", bool(toast_ok))
+    page.evaluate("document.querySelector('#toast-wrap .toast .toast-close').click()")
+    page.wait_for_timeout(500)
+    toast_gone = page.evaluate("document.querySelectorAll('#toast-wrap .toast').length === 0")
+    check("Toast: Close-Button entfernt Meldung", bool(toast_gone))
+
+    # 3) loadModel -> roter Entladen-Button aktiv
+    page.evaluate("""async () => {
+      const m = state.local[0];
+      await loadModel(m);
+    }""")
+    page.wait_for_timeout(200)
+    loaded = page.evaluate("""() => {
+      const b = document.querySelector('#btn-unload');
+      const chip = document.querySelector('#chat-model-chip');
+      return { cls: b.className, disabled: b.disabled, text: b.textContent.trim(), live: chip.classList.contains('is-live'), calls: window.__apiCalls };
+    }""")
+    check("loadModel: rotes Entladen aktiv", "btn-danger-ghost" in loaded["cls"] and not loaded["disabled"] and "Entladen" in loaded["text"] and loaded["live"], json.dumps(loaded, ensure_ascii=False))
+    check("loadModel: server.start aufgerufen", any(c[0] == "start" for c in loaded["calls"]))
+
+    # 4) unloadModel -> gruener 'Letztes Modell laden'
+    page.evaluate("async () => { await unloadModel(); }")
+    page.wait_for_timeout(200)
+    unloaded = page.evaluate("""() => {
+      const b = document.querySelector('#btn-unload');
+      const chip = document.querySelector('#chat-model-chip');
+      return { cls: b.className, disabled: b.disabled, text: b.textContent.trim(), live: chip.classList.contains('is-live'), calls: window.__apiCalls };
+    }""")
+    check("unload: gruener 'Letztes Modell laden'",
+          "btn-ok" in unloaded["cls"] and not unloaded["disabled"] and unloaded["text"] == "Letztes Modell laden" and not unloaded["live"],
+          json.dumps(unloaded, ensure_ascii=False))
+    check("unload: server.stop aufgerufen", any(c[0] == "stop" for c in unloaded["calls"]))
+    page.wait_for_timeout(350)
+    toasts = page.evaluate("[...document.querySelectorAll('#toast-wrap .toast .toast-msg')].map(t => t.textContent)")
+    check("unload: nur Abschluss-Toast sichtbar", len(toasts) == 1 and "bereit zum Neuladen" in toasts[0], str(toasts))
+
+    # 5) Klick auf gruenen Button laedt letztes Modell wieder
+    page.click("#btn-unload")
+    page.wait_for_timeout(200)
+    reloaded = page.evaluate("""() => {
+      const b = document.querySelector('#btn-unload');
+      const starts = window.__apiCalls.filter(c => c[0] === 'start');
+      return { cls: b.className, text: b.textContent.trim(), starts: starts.length, lastModelPath: starts.length ? starts[starts.length-1][1].modelPath : null };
+    }""")
+    check("Neuladen: Klick laedt letztes Modell",
+          "btn-danger-ghost" in reloaded["cls"] and reloaded["starts"] == 2 and reloaded["lastModelPath"] == "/tmp/models/model.Q4_K_M.gguf",
+          json.dumps(reloaded, ensure_ascii=False))
+
+    # 6) setTab: aria-selected + Panels
+    page.evaluate("setTab('local')")
+    page.wait_for_timeout(100)
+    tabs = page.evaluate("""() => {
+      const sel = document.querySelector('#tab-btn-local').getAttribute('aria-selected');
+      const locVis = !document.querySelector('#tab-local').classList.contains('is-hidden');
+      const catHidden = document.querySelector('#tab-catalog').classList.contains('is-hidden');
+      const start = document.querySelector('#tab-btn-local').hasAttribute('focusgroupstart');
+      return { sel, locVis, catHidden, start };
+    }""")
+    check("setTab: aria-selected + Panels + focusgroupstart", tabs["sel"] == "true" and tabs["locVis"] and tabs["catHidden"] and tabs["start"], json.dumps(tabs))
+
+    # 7) Tabs-Keyboard: ArrowRight wechselt Tab (native focusgroup oder Fallback)
+    page.evaluate("setTab('catalog')")
+    page.evaluate("setView('models')")
+    page.wait_for_timeout(100)
+    page.focus("#tab-btn-catalog")
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(100)
+    kb = page.evaluate("""() => {
+      const active = document.activeElement ? document.activeElement.id : null;
+      const sel = document.querySelector('#tab-btn-search').getAttribute('aria-selected');
+      return { active, sel };
+    }""")
+    check("Tabs: Pfeiltaste wechselt Tab + Auswahl", kb["active"] == "tab-btn-search" and kb["sel"] == "true", json.dumps(kb))
+
+    # 8) confirmDialog: destruktiv -> Fokus auf Abbrechen, OK liefert true
+    page.evaluate("""() => {
+      window.__cd = null;
+      confirmDialog({ title: 'Löschen?', message: 'Wirklich?', okLabel: 'Löschen', danger: true }).then(r => window.__cd = r);
+    }""")
+    page.wait_for_timeout(100)
+    dlg = page.evaluate("""() => {
+      const d = document.querySelector('#confirm-dialog');
+      return { open: d.open, title: document.querySelector('#confirm-title').textContent, okCls: document.querySelector('#confirm-ok').className, focusId: document.activeElement ? document.activeElement.id : null };
+    }""")
+    check("confirmDialog: modal offen, Titel, danger-Klasse, Fokus Abbrechen", dlg["open"] and dlg["title"] == "Löschen?" and "btn-danger" in dlg["okCls"] and dlg["focusId"] == "confirm-cancel", json.dumps(dlg, ensure_ascii=False))
+    page.click("#confirm-ok")
+    page.wait_for_timeout(100)
+    cd_ok = page.evaluate("window.__cd")
+    check("confirmDialog: OK ergibt true", cd_ok is True, str(cd_ok))
+
+    # 9) confirmDialog: Esc ergibt false
+    page.evaluate("""() => {
+      window.__cd2 = 'pending';
+      confirmDialog({ title: 'T', message: 'M', okLabel: 'OK' }).then(r => window.__cd2 = r);
+    }""")
+    page.wait_for_timeout(100)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(100)
+    cd_esc = page.evaluate("window.__cd2")
+    check("confirmDialog: Esc ergibt false", cd_esc is False, str(cd_esc))
+
+    # 10) Composer ohne Modell deaktiviert
+    page.evaluate("async () => { await unloadModel(); }")
+    page.wait_for_timeout(150)
+    composer = page.evaluate("""() => {
+      const i = document.querySelector('#input');
+      const s = document.querySelector('#btn-send');
+      return { inputDisabled: i.disabled, sendDisabled: s.disabled };
+    }""")
+    check("Composer ohne Modell deaktiviert", composer["inputDisabled"] and composer["sendDisabled"], json.dumps(composer))
+
+    relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
+    check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))
+
+    browser.close()
+
+fails = [r for r in results if not r[1]]
+print(f"\n=== {len(results) - len(fails)}/{len(results)} bestanden ===")
+sys.exit(1 if fails else 0)

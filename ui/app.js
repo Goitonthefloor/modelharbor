@@ -13,7 +13,7 @@ const state = {
   local: [],
   searchResults: [],
   filePanel: null,
-  server: { running: false, starting: false, port: null, model: null, preset: null },
+  server: { running: false, starting: false, port: null, model: null, preset: null, lastModel: null, unloading: false },
   chat: { messages: [], streaming: false, abort: null, pending: null },
   downloads: new Map(),
   backendInstalls: new Map(),
@@ -46,13 +46,99 @@ function basename(p) {
   return parts[parts.length - 1];
 }
 
+let toastSeq = 0; // eindeutige IDs für Popover-Toasts
+
 function toast(message, kind = 'info', ms = 4200) {
   const wrap = $('#toast-wrap');
+  const id = `toast-${++toastSeq}`;
   const el = document.createElement('div');
   el.className = `toast${kind === 'error' ? ' is-error' : kind === 'ok' ? ' is-ok' : ''}`;
-  el.textContent = message;
+  el.id = id;
+  el.setAttribute('popover', 'manual');
+  el.innerHTML = `
+    <span class="toast-msg">${esc(message)}</span>
+    <button type="button" class="toast-close" popovertarget="${id}" popovertargetaction="hide" aria-label="Schließen">×</button>`;
   wrap.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; setTimeout(() => el.remove(), 260); }, ms);
+  if (typeof el.showPopover === 'function') el.showPopover();
+
+  const closeBtn = el.querySelector('.toast-close');
+  const dismiss = () => {
+    if (el.classList.contains('is-leaving')) return;
+    el.classList.add('is-leaving');
+    setTimeout(() => {
+      if (typeof el.hidePopover === 'function') { try { el.hidePopover(); } catch { /* bereits zu */ } }
+      el.remove();
+      stackToasts();
+    }, 220);
+  };
+  closeBtn.addEventListener('click', dismiss);
+  // Dismissal pausieren, solange der Fokus in der Meldung liegt
+  let timer = setTimeout(dismiss, ms);
+  const restart = () => { clearTimeout(timer); timer = setTimeout(dismiss, ms); };
+  el.addEventListener('focusin', () => clearTimeout(timer));
+  el.addEventListener('focusout', restart);
+  el.addEventListener('pointerenter', () => clearTimeout(timer));
+  el.addEventListener('pointerleave', restart);
+  stackToasts();
+  announce(message);
+}
+
+// Toasts im Top-Layer stapeln (ignorieren parent-z-index → Abstände selbst setzen)
+function stackToasts() {
+  const toasts = $$('.toast', $('#toast-wrap')).filter((t) => !t.classList.contains('is-leaving'));
+  let bottom = 0;
+  for (const t of toasts) {
+    bottom += t.offsetHeight + 10;
+    t.style.bottom = `${bottom}px`;
+  }
+}
+
+// Screenreader: ariaNotify() wenn verfügbar, sonst Live-Region
+function announce(message) {
+  if (typeof Element.prototype.ariaNotify === 'function') {
+    document.body.ariaNotify(String(message));
+  } else {
+    const live = $('#sr-live');
+    if (live) live.textContent = String(message);
+  }
+}
+
+// Entfernt alle aktiven Toasts (z. B. veraltete Lade-Meldungen beim Entladen)
+function clearToasts() {
+  for (const t of $$('.toast', $('#toast-wrap'))) {
+    if (t.classList.contains('is-leaving')) continue;
+    t.classList.add('is-leaving');
+    setTimeout(() => {
+      if (typeof t.hidePopover === 'function') { try { t.hidePopover(); } catch { /* bereits zu */ } }
+      t.remove();
+      stackToasts();
+    }, 200);
+  }
+}
+
+function confirmDialog({ title, message, okLabel = 'Bestätigen', danger = false }) {
+  return new Promise((resolve) => {
+    const dlg = $('#confirm-dialog');
+    if (!dlg) { resolve(confirm(message)); return; }
+    $('#confirm-title').textContent = title;
+    $('#confirm-message').textContent = message;
+    const ok = $('#confirm-ok');
+    ok.textContent = okLabel;
+    ok.classList.toggle('btn-danger', danger);
+    ok.classList.toggle('btn-primary', !danger);
+    dlg.returnValue = '';
+    const onClose = () => {
+      dlg.removeEventListener('close', onClose);
+      const val = dlg.returnValue;
+      dlg.returnValue = '';
+      resolve(val === 'ok');
+    };
+    dlg.addEventListener('close', onClose);
+    dlg.showModal();
+    // Bei destruktiven Aktionen liegt der Fokus auf der sicheren Aktion
+    if (danger) $('#confirm-cancel').focus();
+    else ok.focus();
+  });
 }
 
 function fitBadge(fit) {
@@ -166,7 +252,7 @@ function renderSidebar() {
     <div class="side-block">
       <div class="side-label">Hardware</div>
       <div class="side-value">${esc(gpu ? `${gpu.vendor} · ${gpu.vramGB} GB` : 'CPU only')}</div>
-      <div class="side-value" style="font-size:11px;color:#5e6b7c">${esc(hw.cpuModel.replace(/\(R\)|\(TM\)/g, '').replace(/\s+/g, ' ').slice(0, 34))}</div>
+      <div class="side-value side-cpu">${esc(hw.cpuModel.replace(/\(R\)|\(TM\)/g, '').replace(/\s+/g, ' '))}</div>
     </div>
     <div class="side-block">
       <div class="side-label">Backend</div>
@@ -230,7 +316,34 @@ function renderChatState() {
   if (empty) empty.style.display = state.chat.messages.length ? 'none' : '';
   if (state.server.running && empty) empty.style.display = 'none';
 
+  renderUnloadBtn();
   renderSidebar();
+}
+
+const ICON_EJECT = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 14h14L12 5l-7 9Z"></path><path d="M5 19h14"></path></svg>';
+const ICON_RELOAD = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5"></path></svg>';
+
+// Topbar-Button: läuft ein Modell → rotes „Entladen“; sonst mit letztem Modell → grünes „Letztes Modell laden“
+function renderUnloadBtn() {
+  const btn = $('#btn-unload');
+  if (!btn) return;
+  const busy = state.server.starting || state.server.unloading;
+  if (state.server.running) {
+    btn.className = 'btn btn-danger-ghost';
+    btn.disabled = busy;
+    btn.title = 'Modell aus dem Speicher entladen';
+    btn.innerHTML = state.server.unloading ? 'Entlade …' : `${ICON_EJECT} Entladen`;
+  } else if (state.server.lastModel) {
+    btn.className = 'btn btn-ok';
+    btn.disabled = busy;
+    btn.title = 'Zuletzt geladenes Modell wieder laden';
+    btn.innerHTML = `${ICON_RELOAD} Letztes Modell laden`;
+  } else {
+    btn.className = 'btn btn-danger-ghost';
+    btn.disabled = true;
+    btn.title = 'Kein Modell geladen';
+    btn.innerHTML = `${ICON_EJECT} Entladen`;
+  }
 }
 
 function monogram(p) {
@@ -425,13 +538,18 @@ function stopGeneration() {
 async function loadModel(model, { presetOverride } = {}) {
   if (!model || !model.path) { toast('Modellpfad fehlt', 'error'); return; }
   if (state.server.running || state.server.starting) {
-    const ok = confirm('Es ist bereits ein Modell geladen. Entladen und das neue laden?');
+    const ok = await confirmDialog({
+      title: 'Modell wechseln',
+      message: 'Es ist bereits ein Modell geladen. Entladen und das neue laden?',
+      okLabel: 'Entladen & laden',
+    });
     if (!ok) return;
     await unloadModel(true);
   }
   const preset = presetOverride || state.server.preset || state.settings?.lastPreset || 'balanced';
   state.server.starting = true;
   renderChatState();
+  clearToasts();
   toast(`Lade ${basename(model.path)} …`, 'info', 8000);
   try {
     const res = await bridge.server.start({
@@ -441,7 +559,11 @@ async function loadModel(model, { presetOverride } = {}) {
       ctx: state.settings.ctx,
       gpuLayers: model.fit ? model.fit.gpuLayers : state.settings.gpuLayers,
     });
-    state.server = { running: true, starting: false, port: res.port, model: model.path, preset: res.preset };
+    state.server = {
+      running: true, starting: false, port: res.port, model: model.path, preset: res.preset,
+      unloading: false,
+      lastModel: { path: model.path, id: model.id || null, fit: model.fit || null },
+    };
     if (res.fit) state.server.fit = res.fit;
     renderChatState();
     renderPresetSelect();
@@ -456,12 +578,29 @@ async function loadModel(model, { presetOverride } = {}) {
 }
 
 async function unloadModel(silent = false) {
+  const last = state.server.lastModel;
+  if (!silent) {
+    // Sofortiges Feedback beim Klick
+    state.server.unloading = true;
+    renderChatState();
+    clearToasts();
+    toast('Modell wird entladen …', 'info', 1500);
+  }
   try {
     await bridge.server.stop();
-    state.server = { running: false, starting: false, port: null, model: null, preset: state.server.preset };
+    state.server = {
+      running: false, starting: false, port: null, model: null,
+      preset: state.server.preset, lastModel: last, unloading: false,
+    };
     renderChatState();
-    if (!silent) toast('Modell entladen', 'info', 2200);
+    if (!silent) {
+      clearToasts();
+      toast('Modell entladen — bereit zum Neuladen', 'ok');
+    }
   } catch (e) {
+    state.server.unloading = false;
+    renderChatState();
+    clearToasts();
     toast(`Entladen fehlgeschlagen: ${e.message}`, 'error');
   }
 }
@@ -751,7 +890,13 @@ function bindEvents() {
   $$('.nav-item').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
   $('#btn-open-models').addEventListener('click', () => { setView('models'); setTab('local'); });
   $('#btn-empty-action').addEventListener('click', () => { setView('models'); setTab('catalog'); });
-  $('#btn-unload').addEventListener('click', () => unloadModel());
+  $('#btn-unload').addEventListener('click', () => {
+    if (state.server.running && !state.server.starting && !state.server.unloading) {
+      unloadModel();
+    } else if (!state.server.running && !state.server.starting && state.server.lastModel) {
+      loadModel(state.server.lastModel);
+    }
+  });
   $('#btn-models-folder').addEventListener('click', () => bridge.shell.showModels());
   $('#btn-rescan').addEventListener('click', async () => {
     toast('Erkenne Hardware neu …', 'info', 1800);
@@ -777,12 +922,14 @@ function bindEvents() {
   });
   const input = $('#input');
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      // IME-Komposition (z. B. japanisch/chinesisch) nicht als Sendung interpretieren
+      if (e.isComposing || e.keyCode === 229) return;
+      sendMessage();
+    }
   });
-  input.addEventListener('input', () => {
-    input.style.height = 'auto';
-    input.style.height = Math.min(200, input.scrollHeight) + 'px';
-  });
+  // Auto-Größe per CSS field-sizing: content (styles.css), kein scrollHeight-JS nötig
   // Stream stoppen per Klick auf Senden-Button während Streaming
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.chat.streaming) stopGeneration();
@@ -790,8 +937,27 @@ function bindEvents() {
 
   // Tabs
   $$('#models-tabs .tab').forEach((t) => t.addEventListener('click', () => setTab(t.dataset.tab)));
+  // Selection follows focus (native focusgroup bzw. Fallback unten)
+  $('#models-tabs').addEventListener('focusin', (e) => {
+    if (e.target && e.target.dataset && e.target.dataset.tab) setTab(e.target.dataset.tab);
+  });
+  // Fallback-Tastatursteuerung, falls focusgroup nicht unterstützt wird
+  if (!('focusGroup' in HTMLElement.prototype)) {
+    $('#models-tabs').addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const tabs = $$('#models-tabs .tab');
+      const idx = tabs.indexOf(document.activeElement);
+      if (idx < 0) return;
+      e.preventDefault();
+      const next = tabs[(idx + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      next.focus();
+      setTab(next.dataset.tab);
+    });
+  }
   $('#btn-search').addEventListener('click', doSearch);
-  $('#search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+  $('#search-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) doSearch();
+  });
   $('#file-panel-close').addEventListener('click', () => $('#file-panel').classList.add('is-hidden'));
 
   // Delegierte Klicks
@@ -825,7 +991,13 @@ function bindEvents() {
     if (act === 'delete-local') {
       const m = state.local.find((l) => l.id === btn.dataset.id);
       if (!m) return;
-      if (!confirm(`Modell wirklich löschen?\n\n${m.file}\n${m.sizeLabel}`)) return;
+      const ok = await confirmDialog({
+        title: 'Modell wirklich löschen?',
+        message: `${m.file}\n${m.sizeLabel}`,
+        okLabel: 'Löschen',
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await bridge.models.delete(m.id);
         toast('Modell gelöscht', 'ok');
@@ -852,7 +1024,13 @@ function bindEvents() {
     }
     if (act === 'remove-backend') {
       const id = btn.dataset.id;
-      if (!confirm(`Backend ${id} entfernen?`)) return;
+      const ok = await confirmDialog({
+        title: 'Backend entfernen?',
+        message: `Backend ${id} wirklich entfernen?`,
+        okLabel: 'Entfernen',
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await bridge.backends.remove(id);
         state.backends = await bridge.backends.list();
@@ -931,6 +1109,9 @@ function bindEvents() {
       state.server.port = st.port;
       state.server.model = st.model;
       if (st.preset) state.server.preset = st.preset;
+      if (!state.server.lastModel) {
+        state.server.lastModel = { path: st.model, id: null, fit: null };
+      }
     } else if (!state.server.starting) {
       state.server.running = false;
     }
@@ -961,8 +1142,14 @@ async function startDownload(repo, file, btn) {
 }
 
 function setTab(tab) {
+  if (state.activeTab === tab) return;
   state.activeTab = tab;
-  $$('#models-tabs .tab').forEach((t) => t.classList.toggle('is-active', t.dataset.tab === tab));
+  $$('#models-tabs .tab').forEach((t) => {
+    const on = t.dataset.tab === tab;
+    t.classList.toggle('is-active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+    t.toggleAttribute('focusgroupstart', on);
+  });
   for (const t of ['catalog', 'search', 'local']) {
     $(`#tab-${t}`).classList.toggle('is-hidden', t !== tab);
   }
@@ -982,7 +1169,10 @@ async function init() {
 
     const st = await bridge.server.state();
     if (st.running) {
-      state.server = { running: true, starting: false, port: st.port, model: st.model, preset: st.preset };
+      state.server = {
+        running: true, starting: false, port: st.port, model: st.model, preset: st.preset,
+        lastModel: { path: st.model, id: null, fit: null }, unloading: false,
+      };
     }
     renderChatState();
 

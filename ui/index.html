@@ -75,7 +75,7 @@
 
         <footer class="composer" id="composer">
           <div class="composer-box">
-            <textarea id="input" rows="1" placeholder="Nachricht schreiben … (Enter = senden, Shift+Enter = neue Zeile)" disabled></textarea>
+            <textarea id="input" rows="1" placeholder="Nachricht schreiben … (Enter = senden, Shift+Enter = neue Zeile)" aria-label="Nachricht" disabled></textarea>
             <button class="btn btn-primary send-btn" id="btn-send" disabled>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4 20-7Z"></path></svg>
             </button>
@@ -99,19 +99,19 @@
           </div>
         </header>
 
-        <div class="tabs" id="models-tabs">
-          <button class="tab is-active" data-tab="catalog">Empfohlen</button>
-          <button class="tab" data-tab="search">HuggingFace durchsuchen</button>
-          <button class="tab" data-tab="local">Installiert <span class="tab-count" id="local-count"></span></button>
+        <div class="tabs" id="models-tabs" focusgroup="tablist nomemory" aria-label="Modell-Ansichten">
+          <button type="button" class="tab is-active" id="tab-btn-catalog" data-tab="catalog" role="tab" aria-selected="true" focusgroupstart>Empfohlen</button>
+          <button type="button" class="tab" id="tab-btn-search" data-tab="search" role="tab" aria-selected="false">HuggingFace durchsuchen</button>
+          <button type="button" class="tab" id="tab-btn-local" data-tab="local" role="tab" aria-selected="false">Installiert <span class="tab-count" id="local-count"></span></button>
         </div>
 
-        <div class="tab-body" id="tab-catalog">
+        <div class="tab-body" id="tab-catalog" role="tabpanel" aria-labelledby="tab-btn-catalog" tabindex="0">
           <div class="grid" id="catalog-grid"></div>
         </div>
 
-        <div class="tab-body is-hidden" id="tab-search">
+        <div class="tab-body is-hidden" id="tab-search" role="tabpanel" aria-labelledby="tab-btn-search" tabindex="0">
           <div class="searchbar">
-            <input type="search" id="search-input" class="input" placeholder="z. B. qwen3, llama 3.1, mistral, coder …">
+            <input type="search" id="search-input" class="input" placeholder="z. B. qwen3, llama 3.1, mistral, coder …" aria-label="HuggingFace durchsuchen">
             <button class="btn btn-primary" id="btn-search">Suchen</button>
           </div>
           <div class="search-hint" id="search-hint">Durchsucht HuggingFace nach GGUF-Modellen, sortiert nach Downloads.</div>
@@ -128,7 +128,7 @@
           </div>
         </div>
 
-        <div class="tab-body is-hidden" id="tab-local">
+        <div class="tab-body is-hidden" id="tab-local" role="tabpanel" aria-labelledby="tab-btn-local" tabindex="0">
           <div class="list" id="local-list"></div>
         </div>
       </section>
@@ -149,7 +149,19 @@
     </main>
   </div>
 
-  <div class="toast-wrap" id="toast-wrap"></div>
+  <div class="toast-wrap" id="toast-wrap" role="region" aria-label="Benachrichtigungen"></div>
+  <div class="sr-only" id="sr-live" aria-live="polite"></div>
+
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <div class="dialog-body">
+      <h2 id="confirm-title">Sicher?</h2>
+      <p id="confirm-message"></p>
+      <form method="dialog" class="dialog-actions">
+        <button type="submit" value="cancel" class="btn btn-ghost" id="confirm-cancel" autofocus>Abbrechen</button>
+        <button type="submit" value="ok" class="btn btn-primary" id="confirm-ok">Bestätigen</button>
+      </form>
+    </div>
+  </dialog>
   <script src="tokenspeed.js"></script>
   <script src="app.js"></script>
 </body>
