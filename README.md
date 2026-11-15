@@ -1,228 +1,227 @@
 # ModelHarbor
 
-Lokale KI-Chatmodelle per Klick: ohne Terminal, ohne Cloud, ohne Konto.
+Local AI chat models in one click: no terminal, no cloud, no account.
 
-ModelHarbor schaut, welche Hardware du hast, sucht das passende llama.cpp-Backend heraus,
-lädt Modelle direkt von HuggingFace und öffnet danach einen Chat, der schon passend
-eingestellt ist.
+ModelHarbor looks at your hardware, picks a matching llama.cpp backend, downloads
+models straight from HuggingFace and then opens a chat that is already set up the
+right way.
 
 ```
-┌──────────────┐   1. Hardware erkennen     ┌───────────────────────────┐
-│  ModelHarbor │ ─────────────────────────► │ CPU / GPU / VRAM / NPU    │
-│  (Desktop)   │                            └───────────────────────────┘
-│              │   2. Backend wählen        CUDA · ROCm · Vulkan · Metal
-│              │   3. Modell laden          HuggingFace (GGUF, mit Resume)
-│              │   4. llama-server starten  Presets: Kreativ / Deterministisch / …
+┌──────────────┐   1. detect hardware      ┌───────────────────────────┐
+│  ModelHarbor │ ────────────────────────► │ CPU / GPU / VRAM / NPU    │
+│  (desktop)   │                           └───────────────────────────┘
+│              │   2. pick a backend       CUDA · ROCm · Vulkan · Metal
+│              │   3. load a model         HuggingFace (GGUF, resumable)
+│              │   4. start llama-server   presets: Creative / Deterministic / …
 └──────────────┘
 ```
 
-## Was es kann
+## What it does
 
-- **Einrichtung ohne Vorwissen.** ModelHarbor erkennt Betriebssystem, CPU, RAM sowie GPUs
-  (NVIDIA, AMD, Intel, Apple) und NPUs. Danach empfiehlt es ein Backend und lädt es herunter.
-- **Viele Backends.** Je nach Plattform stehen llama.cpp-Builds für CUDA (12.4 / 13.5),
-  ROCm/HIP, Vulkan, Metal, SYCL, OpenVINO und CPU zur Verfügung.
-- **Modelle, die zu deinem Rechner passen.** Der Katalog zeigt bei jedem Modell, ob es
-  komplett in den VRAM passt, teilweise auf die GPU ausgelagert wird oder nur im RAM läuft.
-  Die Quantisierung (Q4_K_M, Q6_K usw.) wählt die App gleich mit.
-- **HuggingFace-Suche.** Du kannst beliebige GGUF-Repos durchsuchen, Dateigröße und
-  Hardware-Einschätzung vor dem Download prüfen und dann laden. Der Download lässt sich
-  fortsetzen, und mehrteilige Modelle werden komplett geholt.
-- **Vier Presets** mit echten llama.cpp-Sampler-Ketten:
-  - **Balanced**: für den Alltag, Fragen und Erklärungen
-  - **Kreativ**: mehr Abwechslung (DRY + XTC)
-  - **Deterministisch**: Greedy-Sampling mit festem Seed, also reproduzierbar
-  - **Code / Reasoning**: kühles Sampling mit Wiederholungsbremse
-- **NPU-Erkennung.** Intel-NPU, AMD-XDNA und Apple Neural Engine werden angezeigt. Wo es
-  Sinn ergibt (Intel-NPU mit OpenVINO), gibt es dafür eine experimentelle Option. Ansonsten
-  läuft der Chat ehrlich über GPU oder CPU.
-- **Denkmodelle.** Modelle wie Qwen3 zeigen ihren `reasoning_content` als aufklappbaren
-  Gedankengang, die eigentliche Antwort bleibt davon getrennt.
-- **Tempo-Anzeige.** Nach jeder Antwort stehen unter dem Chat die Prompt-Token, die
-  Antwort-Token und die tatsächlich erreichte Rate in `tok/s` — gemessen vom ersten bis
-  zum letzten Stream-Delta, nicht geschätzt.
-- **Bedienung.** Stop-Button (oder `Esc`) während einer Antwort, Chatverlauf mit Kopieren
-  und Neu generieren. Die Oberfläche ist deutsch und läuft nach dem ersten Download offline.
-- **Entladen & Neuladen.** Ein Klick auf **Entladen** gibt sofort Rückmeldung und räumt das
-  Modell aus dem Speicher. Danach wird der rote Button zum grünen **„Letztes Modell laden“** —
-  das zuletzt verwendete Modell ist damit mit einem Klick wieder da (inkl. Preset und GPU-Fit).
-- **Rundum bedienbar.** Die Modell-Tabs lassen sich mit den Pfeiltasten wechseln, der aktive
-  Tab hat einen deutlichen Unterstrich, und jede Aktion hat sichtbares Fokus- und
-  Druck-Feedback. Bestätigungen (Modell wechseln, Löschen, Backend entfernen) erscheinen als
-  eigene Dialoge, Meldungen als schließbare Hinweise, die auch Screenreader mitbekommen.
-- **Auto-Update.** Beim Start prüft die App still gegen die GitHub-Releases, ob eine neuere
-  Version da ist. Wenn ja, fragt ein Dialog: **Jetzt aktualisieren** lädt das passende Paket
-  (AppImage/Installer) direkt herunter — eine Statusleiste zeigt den Fortschritt — und du
-  öffnest die Datei anschließend mit einem Klick. Ohne Update keine Unterbrechung. In der
-  Einrichtung geht auch ein manueller Check („Nach Updates suchen“).
+- **Setup without prior knowledge.** ModelHarbor detects your operating system, CPU, RAM,
+  GPUs (NVIDIA, AMD, Intel, Apple) and NPUs. It then recommends a backend and downloads it.
+- **Plenty of backends.** Depending on the platform, llama.cpp builds for CUDA (12.4 / 13.5),
+  ROCm/HIP, Vulkan, Metal, SYCL, OpenVINO and CPU are available.
+- **Models that match your machine.** For every model the catalog shows whether it fits
+  fully into VRAM, is partly offloaded to the GPU, or only runs in RAM. The app also picks
+  a matching quantization (Q4_K_M, Q6_K and so on).
+- **HuggingFace search.** You can search any GGUF repo, check file size and the hardware
+  estimate before downloading, and then load it. Downloads resume after an interruption and
+  multi-part models are fetched completely.
+- **Four presets** with real llama.cpp sampler chains:
+  - **Balanced**: everyday use, questions and explanations
+  - **Creative**: more variety (DRY + XTC)
+  - **Deterministic**: greedy sampling with a fixed seed, so it is reproducible
+  - **Code / Reasoning**: cool sampling with a repetition brake
+- **NPU detection.** Intel NPUs, AMD XDNA and the Apple Neural Engine are shown. Where it makes
+  sense (Intel NPU with OpenVINO) there is an experimental option for it. Otherwise the chat
+  honestly runs on GPU or CPU.
+- **Reasoning models.** Models such as Qwen3 show their `reasoning_content` as a collapsible
+  train of thought, kept separate from the actual answer.
+- **Speed readout.** After every answer the chat footer shows prompt tokens, response tokens
+  and the rate actually reached in `tok/s` — measured from the first to the last stream delta,
+  not estimated.
+- **Handling.** Stop button (or `Esc`) during an answer, chat history with copy and regenerate.
+  The interface is available in German and English (switchable in the setup, no restart needed)
+  and keeps working offline after the first download.
+- **Unload & reload.** One click on **Unload** gives immediate feedback and frees the model from
+  memory. The red button then turns into the green **“Load last model”** — the last model used is
+  back with a single click (including preset and GPU fit).
+- **Usable all round.** The model tabs can be switched with the arrow keys, the active tab has a
+  clear underline, and every action has visible focus and press feedback. Confirmations (switch
+  model, delete, remove backend) are shown as dedicated dialogs, messages as dismissible notices
+  that screen readers pick up as well.
+- **Auto-update.** On startup the app silently checks the GitHub releases for a newer version.
+  If there is one, a dialog asks: **Update now** downloads the matching package
+  (AppImage/installer) directly — a status bar shows the progress — and you open the file
+  afterwards with one click. No update, no interruption. The setup view also offers a manual
+  check (“Check for updates”).
 
 ## Installation
 
-Die fertigen Pakete liegen in `dist/`:
+The ready-made packages live in `dist/`:
 
-| Plattform | Datei | Stand |
+| Platform | File | Status |
 |---|---|---|
-| Windows 10/11 (x64) | `dist/windows/ModelHarbor Setup 1.1.0.exe` | bauen mit `npm run dist:win` (Windows oder Wine; 1.0.0-Installer liegt bereit) |
-| Linux (x64) | `dist/ModelHarbor-1.1.0.AppImage` | gebaut, im Alltagsbetrieb getestet (121 MB) |
-| macOS (Apple Silicon / Intel) | `ModelHarbor-1.1.0-arm64.dmg` / `-x64.dmg` | bauen mit `npm run dist:mac` (auf einem Mac) |
+| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.2.2.exe` | build with `npm run dist:win` (Windows or Wine; the 1.2.1 installer is available) |
+| Linux (x64) | `dist/ModelHarbor-1.2.2.AppImage` | built, tested in everyday use (121 MB) |
+| macOS (Apple Silicon / Intel) | `ModelHarbor-1.2.2-arm64.dmg` / `-x64.dmg` | build with `npm run dist:mac` (on a Mac) |
 
-Beim ersten Start führt dich die App durch die Einrichtung: Hardware prüfen, Backend
-installieren, Modell auswählen.
+On first start the app walks you through the setup: check hardware, install a backend,
+pick a model.
 
-> Die Pakete sind nicht signiert. Windows zeigt beim ersten Start eine SmartScreen-Warnung
-> („Weitere Informationen“ → „Trotzdem ausführen“). macOS verlangt beim ersten Start
-> einen Rechtsklick → „Öffnen“.
-> ModelHarbor sendet keine Telemetrie. Downloads kommen nur von `huggingface.co` und
+> The packages are not signed. On first start Windows shows a SmartScreen warning
+> (“More info” → “Run anyway”). On macOS the first start asks for a right click → “Open”.
+> ModelHarbor sends no telemetry. Downloads only come from `huggingface.co` and
 > `github.com`.
 
-## Selbst bauen
+## Building it yourself
 
-Du brauchst Node.js ≥ 20 und npm.
+You need Node.js ≥ 20 and npm.
 
 ```bash
 npm install
-npm start                 # Entwicklungsmodus
-npm test                  # Backend-Unit-Tests (Hardware, Presets, Server-Args)
-python3 scripts/ui-smoke.py   # Renderer-Smoke-Test (braucht Playwright + Chromium)
+npm start                 # development mode
+npm test                  # backend unit tests (hardware, presets, server args)
+python3 scripts/ui-smoke.py   # renderer smoke test (needs Playwright + Chromium)
 npm run dist:linux        # AppImage
-npm run dist:win          # NSIS-Installer
+npm run dist:win          # NSIS installer
 npm run dist:mac          # DMG
 ```
 
-Der Renderer-Smoke-Test (`scripts/ui-smoke.py`) lädt die Oberfläche headless in Chromium,
-mockt die Electron-Bridge und prüft die wichtigsten Abläufe: Entladen → „Letztes Modell laden“,
-Toast-Meldungen, Tab-Navigation per Tastatur, Bestätigungsdialoge. Erwarteter Exit-Code: 0.
+The renderer smoke test (`scripts/ui-smoke.py`) loads the interface headless in Chromium,
+mocks the Electron bridge and checks the main flows: unload → “Load last model”, toast
+messages, keyboard tab navigation, confirmation dialogs, plus the language switch
+(German → English → German). Expected exit code: 0.
 
-Die Pakete landen in `dist/`. Windows- und macOS-Pakete baust du am besten auf dem jeweiligen
-System (oder in der CI). Cross-Builds von Linux nach Windows funktionieren nur mit Wine.
+The packages land in `dist/`. Windows and macOS packages are best built on the respective
+system (or in CI). Cross-builds from Linux to Windows only work with Wine.
 
-Bisher getestet habe ich: Linux (Entwicklung und AppImage, CPU-Backend, Modell-Download,
-Chat mit Qwen3-4B) sowie Windows 11 (Hardware-Erkennung, CUDA-Empfehlung, Installation des
-NSIS-Pakets). Weitere Hardware-Kombinationen sind als Nächstes geplant. Mehr dazu unten.
+What I have tested so far: Linux (development and AppImage, CPU backend, model download,
+chat with Qwen3-4B) and Windows 11 (hardware detection, CUDA recommendation, installing the
+NSIS package). More hardware combinations are next on the list. See below for details.
 
-## Datenpfade
+## Data paths
 
-| Inhalt | Windows | Linux | macOS |
+| Content | Windows | Linux | macOS |
 |---|---|---|---|
-| Einstellungen | `%APPDATA%\ModelHarbor` | `~/.config/ModelHarbor` | `~/Library/Application Support/ModelHarbor` |
-| Modelle | `…\ModelHarbor\models` | `~/.config/ModelHarbor/models` | `…/ModelHarbor/models` |
+| Settings | `%APPDATA%\ModelHarbor` | `~/.config/ModelHarbor` | `~/Library/Application Support/ModelHarbor` |
+| Models | `…\ModelHarbor\models` | `~/.config/ModelHarbor/models` | `…/ModelHarbor/models` |
 | Backends | `…\ModelHarbor\backends` | `~/.config/ModelHarbor/backends` | `…/ModelHarbor/backends` |
 
-Modell- und Backend-Ordner kannst du in der App unter **Einrichtung → Einstellungen** ändern.
+You can change the model and backend folders in the app under **Setup → Settings**.
 
-## So erkennt ModelHarbor die Hardware
+## How ModelHarbor detects the hardware
 
-| Plattform | GPU | VRAM | NPU |
+| Platform | GPU | VRAM | NPU |
 |---|---|---|---|
-| Windows | `nvidia-smi`, WMI (`Win32_VideoController`) | `nvidia-smi`; bei AMD und Intel eine Schätzung | `Get-PnpDevice` (ComputeAccelerator / AI Boost / XDNA / Hexagon) |
+| Windows | `nvidia-smi`, WMI (`Win32_VideoController`) | `nvidia-smi`; an estimate for AMD and Intel | `Get-PnpDevice` (ComputeAccelerator / AI Boost / XDNA / Hexagon) |
 | Linux | `nvidia-smi`, `lspci`, sysfs | `nvidia-smi`, `/sys/class/drm/*/mem_info_vram_total` | `lspci` (Processing Accelerators), `/dev/accel/*` |
-| macOS | `system_profiler SPDisplaysDataType` | Unified Memory (Apple Silicon: etwa 66 % des RAM) | Apple Neural Engine (nur als Information) |
+| macOS | `system_profiler SPDisplaysDataType` | unified memory (Apple Silicon: about 66 % of RAM) | Apple Neural Engine (informational only) |
 
-Das Backend empfiehlt die App nach dieser Logik:
+The backend recommendation follows this logic:
 
-1. **Apple Silicon**: Metal-Build.
-2. **NVIDIA**: CUDA, weil es deutlich schneller ist als Vulkan. Vulkan ist die Alternative.
-3. **AMD unter Linux**: ROCm, wenn die Runtime vorhanden ist. Sonst Vulkan.
-4. **AMD unter Windows**: Vulkan, weil es stabil läuft. ROCm gibt es als experimentelle Option.
-5. **Intel**: Vulkan. SYCL ist experimentell. OpenVINO nur, wenn eine Intel-NPU erkannt wird.
-6. **Keine GPU**: CPU-Build.
+1. **Apple Silicon**: Metal build.
+2. **NVIDIA**: CUDA, because it is clearly faster than Vulkan. Vulkan is the alternative.
+3. **AMD on Linux**: ROCm if the runtime is present. Otherwise Vulkan.
+4. **AMD on Windows**: Vulkan, because it runs reliably. ROCm is available as an experimental option.
+5. **Intel**: Vulkan. SYCL is experimental. OpenVINO only when an Intel NPU is detected.
+6. **No GPU**: CPU build.
 
-## Wie der Modell-Fit berechnet wird
+## How the model fit is calculated
 
-Den Speicherbedarf schätze ich so:
+I estimate the memory requirement like this:
 
 ```
-Bedarf ≈ Dateigröße + KV-Cache + Overhead
-KV-Cache ≈ Parameter × 0,045 GB × (Kontext / 4096)
+need ≈ file size + KV cache + overhead
+KV cache ≈ parameters × 0.045 GB × (context / 4096)
 ```
 
-Daraus ergeben sich vier Stufen: **passt in den VRAM**, **teilweise auf GPU**,
-**läuft im RAM** und **zu groß**. Bei der Quantisierung nimmt die App den größten Quant,
-der mit Reserve hineinpasst. Dabei bleibt sie unter 65 % des Budgets, damit die
-Geschwindigkeit nicht leidet.
+That yields four levels: **fits in VRAM**, **partly on GPU**, **runs in RAM** and **too large**.
+For the quantization the app takes the largest quant that still fits with a safety margin. It
+stays below 65 % of the budget so that speed does not suffer.
 
-## Presets im Detail
+## Presets in detail
 
-| Preset | Temp | Top-K | Top-P | Min-P | Besonderheit |
+| Preset | Temp | Top-K | Top-P | Min-P | Special feature |
 |---|---|---|---|---|---|
-| Balanced | 0,70 | 40 | 0,92 | 0,05 | Standard-Sampler-Kette |
-| Kreativ | 1,05 | 80 | 0,96 | 0,02 | DRY 0,8 + XTC 0,4 |
-| Deterministisch | 0,00 | 1 | 1,00 | 0,00 | Seed 42, Greedy |
-| Code / Reasoning | 0,20 | 20 | 0,95 | 0,05 | DRY 0,5, langer Repeat-Bereich |
+| Balanced | 0.70 | 40 | 0.92 | 0.05 | default sampler chain |
+| Creative | 1.05 | 80 | 0.96 | 0.02 | DRY 0.8 + XTC 0.4 |
+| Deterministic | 0.00 | 1 | 1.00 | 0.00 | seed 42, greedy |
+| Code / Reasoning | 0.20 | 20 | 0.95 | 0.05 | DRY 0.5, long repeat range |
 
-Beim Modellstart übergibt die App alle Preset-Parameter an `llama-server`. Im Chat setzt sie
-die Hauptparameter bei jeder Anfrage neu. So wirkt ein Presetwechsel sofort.
+When a model starts, the app passes all preset parameters to `llama-server`. In the chat it
+applies the main parameters again with every request, so a preset change takes effect at once.
 
-## Technik
+## Under the hood
 
-- **Electron**: Hauptprozess und Renderer mit `contextIsolation`, Node läuft nicht im Renderer.
-- **llama.cpp**: Binaries aus den offiziellen `ggml-org/llama.cpp`-Releases. Die App nimmt
-  automatisch den neuesten Build mit Binär-Assets.
-- **llama-server** läuft als lokaler Prozess und stellt eine OpenAI-kompatible API auf
-  `127.0.0.1` bereit.
-- Der Chat streamt per SSE direkt aus dem Renderer.
-- **Updates** kommen von den GitHub-Releases (`Goitonthefloor/modelharbor`): semver-Vergleich
-  im Hauptprozess, Download des plattformpassenden Pakets mit Fortschritts-Status. Der Check
-  ist ein stiller `GET /repos/…/releases/latest` — ohne Konto, ohne Telemetrie.
-- Keine Telemetrie. Außer HuggingFace und GitHub-Releases gibt es keine Cloud-Aufrufe.
+- **Electron**: main process and renderer with `contextIsolation`, Node does not run in the renderer.
+- **llama.cpp**: binaries from the official `ggml-org/llama.cpp` releases. The app automatically
+  takes the newest build that ships binary assets.
+- **llama-server** runs as a local process and exposes an OpenAI-compatible API on `127.0.0.1`.
+- The chat streams via SSE directly from the renderer.
+- **Updates** come from the GitHub releases (`Goitonthefloor/modelharbor`): semver comparison in
+  the main process, download of the platform-matching package with progress status. The check is
+  a silent `GET /repos/…/releases/latest` — no account, no telemetry.
+- No telemetry. Apart from HuggingFace and the GitHub releases there are no cloud calls.
 
-> **Sandbox-Hinweis (Linux-AppImage):** Ein AppImage kann das setuid-Binary für die
-> Chromium-Sandbox nicht mitliefern. Deshalb startet das Paket mit `--no-sandbox`. Das ist bei
-> AppImages üblich. Die App lädt nur lokale Dateien (`file://`) und spricht nur mit dem
-> selbst gestarteten `llama-server` auf `127.0.0.1`. Wenn du die Sandbox willst, baust du mit
-> `npm run dist:linux -- --dir` und startest `dist/linux-unpacked/modelharbor` mit deiner
-> eigenen `chrome-sandbox`. Die Fensterzuordnung läuft über `desktopName` und
+> **Sandbox note (Linux AppImage):** an AppImage cannot ship the setuid binary needed for the
+> Chromium sandbox. That is why the package starts with `--no-sandbox`. This is common for
+> AppImages. The app loads only local files (`file://`) and talks only to the `llama-server` it
+> started itself on `127.0.0.1`. If you want the sandbox, build with
+> `npm run dist:linux -- --dir` and start `dist/linux-unpacked/modelharbor` with your own
+> `chrome-sandbox`. Window association works through `desktopName` and
 > `syncDesktopName` (`StartupWMClass=modelharbor`).
 
-## Fehlerbehebung
+## Troubleshooting
 
-**„Kein Backend installiert“**: Öffne die Einrichtung und installiere das empfohlene Backend.
-Dafür brauchst du einmal Internet. Danach läuft alles offline.
+**“No backend installed”**: open the setup and install the recommended backend. This needs
+internet once. After that everything runs offline.
 
-**Modell lädt nicht oder stürzt ab**: Meist reicht der VRAM nicht. Reduziere in der Einrichtung
-die GPU-Layers (z. B. von 999 auf 20) oder senke die Kontextgröße.
+**Model does not load or crashes**: usually VRAM is not enough. Lower the GPU layers in the setup
+(for example from 999 to 20) or reduce the context size.
 
-**AMD unter Windows ist langsam**: Vulkan ist der stabile Weg. ROCm ist experimentell und
-hängt vom Treiber ab.
+**AMD on Windows is slow**: Vulkan is the stable route. ROCm is experimental and depends on the
+driver.
 
-**Apple Silicon**: Metal ist automatisch aktiv. Die angezeigte VRAM-Zahl ist bei Unified Memory
-nur eine Schätzung.
+**Apple Silicon**: Metal is active automatically. With unified memory the VRAM figure shown is
+only an estimate.
 
-## Feedback gesucht
+## Feedback wanted
 
-ModelHarbor läuft bisher auf meinen eigenen Rechnern. Die Hardware-Erkennung und die
-Backend-Auswahl sind deshalb vor allem für Konfigurationen getestet, die ich selbst habe.
-Als Nächstes möchte ich weitere Kombinationen testen, zum Beispiel AMD-GPUs, Intel-Systeme,
-Notebooks mit Hybrid-Grafik und macOS.
+So far ModelHarbor runs on my own machines. Hardware detection and backend selection are
+therefore mainly tested for the configurations I have myself. Next I want to test more
+combinations, for example AMD GPUs, Intel systems, notebooks with hybrid graphics and macOS.
 
-Wenn du ModelHarbor ausprobierst, sag mir gern:
+If you try ModelHarbor, I would love to hear:
 
-- **Was für ein System du hast** (Betriebssystem, CPU, RAM, GPU, ggf. NPU)
-- **Welches Backend erkannt und installiert wurde** und ob der Chat läuft
-- **Was nicht geklappt hat**, am besten mit dem Fehlertext oder einem Screenshot
+- **what kind of system you have** (operating system, CPU, RAM, GPU, NPU if any)
+- **which backend was detected and installed**, and whether the chat works
+- **what did not work**, ideally with the error text or a screenshot
 
-Das geht am einfachsten über ein [Issue](https://github.com/Goitonthefloor/modelharbor/issues).
-Auch kurze Rückmeldungen wie „läuft“ oder „läuft nicht“ helfen mir schon weiter.
+The easiest way is an [issue](https://github.com/Goitonthefloor/modelharbor/issues).
+Short replies like “works” or “does not work” already help me a lot.
 
-## Lizenz
+## License
 
-**ModelHarbor License 1.0: freie Nutzung, Vertrieb nur mit Lizenz.**
+**ModelHarbor License 1.0: free to use, distribution only with a license.**
 
-| Erlaubt ohne Gebühr | Nur mit schriftlicher Lizenz (gebührenpflichtig) |
+| Allowed free of charge | Only with a written license (fee required) |
 |---|---|
-| Private, schulische und interne Nutzung | Weitergabe an Dritte |
-| Kommerzielle Nutzung **im eigenen** Unternehmen, auf beliebig vielen Geräten | Veröffentlichen, Spiegeln, Upload auf andere Seiten, App-Stores, Paketquellen |
-| Ausprobieren, Testen, Benchmarking | Verkauf, Vermietung, Bündelung mit Produkten |
-| Änderungen für den eigenen Bedarf | Betrieb als Dienst für Dritte (SaaS/PaaS) |
+| Private, educational and internal use | Passing it on to third parties |
+| Commercial use **inside your own** company, on any number of devices | Publishing, mirroring, uploading to other sites, app stores, package repositories |
+| Trying it out, testing, benchmarking | Selling, renting, bundling with products |
+| Modifications for your own needs | Running it as a service for third parties (SaaS/PaaS) |
 
-Forks und öffentliche Kopien sind nicht erlaubt. Die Fork-Funktion dieses Repositories
-ist zusätzlich abgeschaltet.
+Forks and public copies are not allowed. The fork feature of this repository is disabled as
+well.
 
-Das ist bewusst **keine** Open-Source-Lizenz im Sinne der OSI, sondern eine
-*source-available*-Lizenz. Der verbindliche Text steht englisch in [`LICENSE`](LICENSE),
-am Ende gibt es eine unverbindliche deutsche Kurzfassung.
+This is deliberately **not** an open-source license in the OSI sense but a *source-available*
+license. The binding text is in [`LICENSE`](LICENSE) and is maintained in German and English
+(the English text is authoritative); an informal German summary follows at the end of that file.
 
-Fragen zur Lizenz gern als Issue im Repository oder über die Kontaktdaten im GitHub-Profil.
+Questions about the license are welcome as an issue in the repository or through the contact
+details in the GitHub profile.
 
-**Drittkomponenten** behalten ihre eigenen Lizenzen: Electron (MIT), llama.cpp (MIT; wird zur
-Laufzeit vom Nutzer geladen und nicht mitgeliefert), yauzl (MIT), tar (ISC).
+**Third-party components** keep their own licenses: Electron (MIT), llama.cpp (MIT; downloaded
+by the user at runtime and not bundled), yauzl (MIT), tar (ISC).

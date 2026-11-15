@@ -2,6 +2,25 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.2.2] - 2026-11-15
+
+### Fixed
+
+- **`ReferenceError: activeUpdate is not defined` beim Update-Download.** Der
+  IPC-Handler `update:download` nutzte die Variable `activeUpdate`, ohne sie zu
+  deklarieren (nur `activeDownload` existierte). Unter `'use strict'` brach
+  damit jeder Klick auf „Jetzt aktualisieren“ und „Erneut versuchen“ ab; im
+  Renderer erschien „Download fehlgeschlagen: … ReferenceError: activeUpdate is
+  not defined“. Die Variable ist jetzt deklariert, die Logik bleibt unverändert:
+  ein zweiter paralleler Download wird wieder sauber mit „Ein Update-Download
+  läuft bereits.“ abgewiesen.
+
+### Changed
+
+- **README komplett auf Englisch.** Struktur, Tabellen, Code-Blöcke und URLs
+  unverändert; Versionstabelle auf 1.2.2 aktualisiert, Hinweis auf die
+  Sprachumschaltung und den zweisprachigen Lizenztext ergänzt.
+
 ## [1.2.1] - 2026-11-15
 
 ### Added
