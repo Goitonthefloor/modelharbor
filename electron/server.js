@@ -5,6 +5,7 @@
 const { spawn } = require('child_process');
 const net = require('net');
 const path = require('path');
+const i18n = require('../ui/i18n');
 const fs = require('fs');
 const http = require('http');
 const { samplingArgs, getPreset } = require('./presets');
@@ -44,7 +45,7 @@ function freePort(start = 9931) {
     let port = start;
     let attempts = 0;
     const tryPort = () => {
-      if (attempts++ > 60) { reject(new Error('Kein freier Port gefunden')); return; }
+      if (attempts++ > 60) { reject(new Error(i18n.t('error.noFreePort'))); return; }
       const srv = net.createServer();
       srv.once('error', () => { try { srv.close(); } catch { /* ignore */ } port++; tryPort(); });
       srv.once('listening', () => {
@@ -72,7 +73,7 @@ async function waitForHealth(port, { timeoutMs = 180000, onTick } = {}) {
   const start = Date.now();
   let lastStatus = 0;
   while (Date.now() - start < timeoutMs) {
-    if (!proc) throw new Error('Serverprozess ist beendet');
+    if (!proc) throw new Error(i18n.t('error.serverExited'));
     const res = await httpGet(`http://127.0.0.1:${port}/health`);
     lastStatus = res.status;
     if (res.status === 200) return true;
@@ -80,7 +81,7 @@ async function waitForHealth(port, { timeoutMs = 180000, onTick } = {}) {
     await new Promise((r) => setTimeout(r, 700));
   }
   const tail = logs.slice(-12).map((l) => l.line).join('\n');
-  throw new Error(`Modell konnte nicht geladen werden (letzter Status: ${lastStatus}).\n${tail}`);
+  throw new Error(i18n.t('error.modelLoadFailed', { status: lastStatus, tail }));
 }
 
 function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLayers, threads, port, hw }) {
@@ -116,11 +117,11 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
 
 async function startServer(opts) {
   if (state.running || state.starting) {
-    throw new Error('Es läuft bereits ein Modell. Bitte zuerst stoppen.');
+    throw new Error(i18n.t('error.modelAlreadyRunning'));
   }
   const { serverPath, modelPath, presetId = 'balanced', overrides = {}, hw } = opts;
-  if (!fs.existsSync(serverPath)) throw new Error(`Backend fehlt: ${serverPath}`);
-  if (!fs.existsSync(modelPath)) throw new Error(`Modelldatei fehlt: ${modelPath}`);
+  if (!fs.existsSync(serverPath)) throw new Error(i18n.t('error.backendMissing', { path: serverPath }));
+  if (!fs.existsSync(modelPath)) throw new Error(i18n.t('error.modelFileMissing', { path: modelPath }));
 
   const port = opts.port || await freePort(9931);
   const ctx = overrides.ctx || 8192;

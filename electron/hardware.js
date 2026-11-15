@@ -6,6 +6,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const i18n = require('../ui/i18n');
 const { execFile } = require('child_process');
 
 function run(cmd, args, opts = {}) {
@@ -127,7 +128,7 @@ async function detectLinux() {
       if (gpus.some((g) => g.name === desc)) continue;
       // Virtuelle Grafikkarten (VM) sind keine nutzbare GPU-Beschleunigung
       if (['QEMU', 'VMware', 'VirtIO', 'Microsoft'].includes(vendor) || /^device$/i.test(desc)) {
-        notes.push(`Virtuelle Grafikkarte erkannt (${desc || vendor}) — keine GPU-Beschleunigung verfügbar.`);
+        notes.push(i18n.t('hw.note.virtualGpu', { name: desc || vendor }));
         continue;
       }
 
@@ -180,7 +181,7 @@ async function detectLinux() {
   try {
     const accel = fs.readdirSync('/dev/accel');
     if (accel.length) {
-      notes.push(`NPU-Beschleuniger im System: /dev/accel/${accel.join(', ')}`);
+      notes.push(i18n.t('hw.note.accelDevice', { list: accel.join(', ') }));
     }
   } catch { /* kein /dev/accel */ }
 
@@ -353,7 +354,7 @@ async function detectMac() {
       pciId: null,
       usableBy: 'info',
     });
-    notes.push('Apple Neural Engine ist vorhanden, wird von llama.cpp aber nicht unterstützt (Metal/GPU ist der richtige Weg).');
+    notes.push(i18n.t('hw.note.appleNeuralEngine'));
   }
 
   return {
@@ -391,57 +392,57 @@ function recommendBackend(hw, platform = process.platform, arch = process.arch) 
   const add = (id, reason, priority, experimental) => candidates.push({ id, reason, priority, experimental: !!experimental });
 
   if (platform === 'darwin') {
-    if (arch === 'arm64' || hasApple) add('macos-arm64', 'Apple Silicon mit Metal — schnellster Weg auf dem Mac', 100);
-    else add('macos-x64', 'Intel-Mac: CPU-Backend (Metal nur eingeschränkt)', 80);
+    if (arch === 'arm64' || hasApple) add('macos-arm64', i18n.t('reason.darwin.apple'), 100);
+    else add('macos-x64', i18n.t('reason.darwin.intel'), 80);
     return { primary: candidates[0].id, candidates };
   }
 
   if (platform === 'win32') {
     if (hasNvidia) {
-      add('win-cuda-12.4', 'NVIDIA-GPU erkannt — CUDA ist deutlich schneller als Vulkan', 100);
-      add('win-vulkan', 'Vulkan: nur ~36 MB Download, funktioniert auf NVIDIA/AMD/Intel', 60);
+      add('win-cuda-12.4', i18n.t('reason.win.nvidiaCuda'), 100);
+      add('win-vulkan', i18n.t('reason.win.vulkanNvidia'), 60);
     }
     if (hasAmd) {
-      add('win-vulkan', 'AMD-GPU auf Windows: Vulkan ist der stabile Weg', 100);
-      add('win-rocm', 'ROCm/HIP-Build für AMD unter Windows — experimentell, Treiber müssen passen', 40, true);
+      add('win-vulkan', i18n.t('reason.win.amdVulkan'), 100);
+      add('win-rocm', i18n.t('reason.win.amdRocm'), 40, true);
     }
     if (hasIntelGpu) {
-      add('win-vulkan', 'Intel-GPU/Arc: Vulkan ist der stabile Weg', 90);
-      if (intelNpu) add('win-openvino', 'Intel-NPU erkannt: OpenVINO kann die NPU nutzen — nur kleine Modelle, experimentell', 30, true);
+      add('win-vulkan', i18n.t('reason.win.intelVulkan'), 90);
+      if (intelNpu) add('win-openvino', i18n.t('reason.win.intelNpu'), 30, true);
     }
-    if (!hasNvidia && !hasAmd && !hasIntelGpu) add('win-cpu-x64', 'Keine nutzbare GPU erkannt — CPU-Backend', 50);
+    if (!hasNvidia && !hasAmd && !hasIntelGpu) add('win-cpu-x64', i18n.t('reason.win.noGpu'), 50);
     if (arch === 'arm64') {
-      add('win-cpu-arm64', 'Windows on ARM: CPU-Backend für ARM64', 70);
-      add('win-vulkan-arm64', 'Windows on ARM mit Adreno/Qualcomm-GPU', 60);
+      add('win-cpu-arm64', i18n.t('reason.win.armCpu'), 70);
+      add('win-vulkan-arm64', i18n.t('reason.win.armVulkan'), 60);
     }
-    if (!hasNvidia) add('win-cuda-12.4', 'CUDA-Build als Option, falls später eine NVIDIA-Karte dazukommt', 10);
-    if (hasNvidia) add('win-cpu-x64', 'CPU-Fallback (langsam, aber funktioniert immer)', 20);
+    if (!hasNvidia) add('win-cuda-12.4', i18n.t('reason.win.cudaOption'), 10);
+    if (hasNvidia) add('win-cpu-x64', i18n.t('reason.win.cpuFallback'), 20);
   }
 
   if (platform === 'linux') {
     if (hasNvidia) {
-      add('linux-cuda-12.8', 'NVIDIA-GPU erkannt — CUDA ist deutlich schneller als Vulkan', 100);
-      add('linux-vulkan', 'Vulkan: nur ~35 MB, treiberunabhängig', 60);
+      add('linux-cuda-12.8', i18n.t('reason.linux.nvidiaCuda'), 100);
+      add('linux-vulkan', i18n.t('reason.linux.vulkanNvidia'), 60);
     }
     if (hasAmd) {
-      if (hw.hasRocm) add('linux-rocm', 'AMD-GPU + ROCm-Runtime erkannt — schnellster Weg', 100);
-      else add('linux-vulkan', 'AMD-GPU: Vulkan ist ohne ROCm-Installation der einfachste Weg', 95);
+      if (hw.hasRocm) add('linux-rocm', i18n.t('reason.linux.amdRocm'), 100);
+      else add('linux-vulkan', i18n.t('reason.linux.amdVulkan'), 95);
     }
     if (hasIntelGpu) {
-      add('linux-vulkan', 'Intel-GPU: Vulkan', 90);
-      add('linux-sycl-fp16', 'Intel oneAPI/SYCL (Arc-GPUs) — experimentell', 40, true);
-      if (intelNpu) add('linux-openvino', 'Intel-NPU erkannt: OpenVINO kann die NPU nutzen — nur kleine Modelle, experimentell', 30, true);
+      add('linux-vulkan', i18n.t('reason.linux.intelVulkan'), 90);
+      add('linux-sycl-fp16', i18n.t('reason.linux.intelSycl'), 40, true);
+      if (intelNpu) add('linux-openvino', i18n.t('reason.linux.intelNpu'), 30, true);
     }
-    if (!hasNvidia && !hasAmd && !hasIntelGpu) add('linux-cpu', 'Keine nutzbare GPU erkannt — CPU-Backend', 50);
-    if (hasNvidia || hasAmd) add('linux-cpu', 'CPU-Fallback', 20);
+    if (!hasNvidia && !hasAmd && !hasIntelGpu) add('linux-cpu', i18n.t('reason.linux.noGpu'), 50);
+    if (hasNvidia || hasAmd) add('linux-cpu', i18n.t('reason.linux.cpuFallback'), 20);
     if (arch === 'arm64') {
-      add('linux-cpu-arm64', 'Linux on ARM64: CPU-Backend', 80);
-      add('linux-vulkan-arm64', 'Linux on ARM64 mit Vulkan-GPU', 60);
+      add('linux-cpu-arm64', i18n.t('reason.linux.armCpu'), 80);
+      add('linux-vulkan-arm64', i18n.t('reason.linux.armVulkan'), 60);
     }
   }
 
   if (!candidates.length) {
-    add(platform === 'win32' ? 'win-cpu-x64' : platform === 'darwin' ? 'macos-arm64' : 'linux-cpu', 'Standard-Fallback', 10);
+    add(platform === 'win32' ? 'win-cpu-x64' : platform === 'darwin' ? 'macos-arm64' : 'linux-cpu', i18n.t('reason.fallback'), 10);
   }
   candidates.sort((a, b) => b.priority - a.priority);
   // Duplikate entfernen (gleiche id, höchste Priorität behalten)

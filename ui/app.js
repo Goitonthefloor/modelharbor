@@ -2,6 +2,8 @@
 /* ModelHarbor — Renderer-Logik (kein Framework, klassisches Script) */
 
 const bridge = window.api;
+const i18n = window.I18N;
+const t = (key, vars, fallback) => i18n.t(key, vars, fallback);
 
 const state = {
   info: null,
@@ -40,6 +42,66 @@ function fmtGB(bytes) {
   return `${(bytes / 1048576).toFixed(0)} MB`;
 }
 
+// Wendet alle statischen Übersetzungen aus index.html an (Text, title, placeholder, aria-label)
+function applyStaticText() {
+  document.documentElement.lang = i18n.getLang();
+  for (const el of $$('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  for (const el of $$('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
+  for (const el of $$('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
+  for (const el of $$('[data-i18n-aria-label]')) el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
+}
+
+// Baut alle dynamischen Bereiche neu auf — nötig nach einem Sprachwechsel
+function rerenderAll() {
+  renderPresetSelect();
+  renderChatState();
+  if (state.view === 'setup') renderSetup();
+  if (state.activeTab === 'local') renderLocal();
+  else if (state.activeTab === 'search') renderSearchResults();
+  else renderCatalog();
+  renderMessages();
+}
+
+// Stellt die Chat-Historie in der aktiven Sprache wieder her
+function renderMessages() {
+  const wrap = $('#messages');
+  if (!wrap) return;
+  wrap.querySelectorAll('.msg').forEach((m) => m.remove());
+  for (const m of state.chat.messages) {
+    const { el, body } = addMessage(m.role, m.content);
+    if (m.role === 'assistant') {
+      body.innerHTML = (m.reasoning ? reasoningBlock(m.reasoning) : '') + renderMarkdown(m.content);
+      addMsgActions(el, m.content);
+    }
+  }
+  renderChatState();
+}
+
+async function setLanguage(next, { persist = true } = {}) {
+  const lang = i18n.setLang(next);
+  if (persist) {
+    try { state.settings = await bridge.settings.set({ language: lang }); }
+    catch { /* Anzeige trotzdem umstellen */ }
+  } else if (state.settings) {
+    state.settings.language = lang;
+  }
+  applyStaticText();
+  rerenderAll();
+  const name = (i18n.LANGS.find((l) => l.id === lang) || {}).label || lang;
+  announce(t('toast.languageChanged', { language: name }));
+  // Notizen, Begründungen und Modelltexte erzeugt der Main-Prozess in der aktiven Sprache
+  await refreshLanguageData();
+}
+
+// Holt hardware-/backend-/modellbezogene Texte neu, damit sie in der neuen Sprache erscheinen
+async function refreshLanguageData() {
+  try { state.hw = await bridge.hw.scan(true); } catch { /* alten Stand behalten */ }
+  try { if (state.backends) state.backends = await bridge.backends.list(); } catch { /* alten Stand behalten */ }
+  rerenderAll();
+  refreshLocal();
+  refreshCatalog();
+}
+
 function basename(p) {
   if (!p) return '';
   const parts = String(p).split(/[\\/]/);
@@ -57,7 +119,7 @@ function toast(message, kind = 'info', ms = 4200) {
   el.setAttribute('popover', 'manual');
   el.innerHTML = `
     <span class="toast-msg">${esc(message)}</span>
-    <button type="button" class="toast-close" popovertarget="${id}" popovertargetaction="hide" aria-label="Schließen">×</button>`;
+    <button type="button" class="toast-close" popovertarget="${id}" popovertargetaction="hide" aria-label="${esc(t('common.close'))}">×</button>`;
   wrap.appendChild(el);
   if (typeof el.showPopover === 'function') el.showPopover();
 
@@ -116,7 +178,7 @@ function clearToasts() {
   }
 }
 
-function confirmDialog({ title, message, okLabel = 'Bestätigen', danger = false }) {
+function confirmDialog({ title, message, okLabel = t('common.confirm'), danger = false }) {
   return new Promise((resolve) => {
     const dlg = $('#confirm-dialog');
     if (!dlg) { resolve(confirm(message)); return; }
@@ -158,20 +220,23 @@ function showUpdateDialog(info) {
   stateUpdate.assetPath = null;
   const dlg = $('#update-dialog');
   const ver = info.latest.tag.replace(/^v/i, '');
-  $('#update-sub').textContent = `Version ${ver} ist verfügbar — du hast ${info.currentVersion || 'diese Version'}.`;
+  $('#update-sub').textContent = t('update.subtitle', {
+    version: ver,
+    current: info.currentVersion || t('update.thisVersion'),
+  });
   const notes = (info.latest.body || '').trim();
-  $('#update-notes').textContent = notes || 'Release-Notes findest du auf der Releases-Seite.';
+  $('#update-notes').textContent = notes || t('update.noNotes');
   $('#update-notes').style.display = notes ? '' : 'none';
   $('#update-progress').classList.add('is-hidden');
   $('#update-progress-fill').style.width = '0%';
-  $('#update-progress-text').textContent = 'Wird heruntergeladen …';
+  $('#update-progress-text').textContent = t('update.downloading');
   $('#update-progress-pct').textContent = '0 %';
   const noAsset = !info.asset;
   $('#update-now').classList.toggle('is-hidden', noAsset);
   $('#update-open').classList.add('is-hidden');
   $('#update-later').classList.toggle('is-hidden', false);
   $('#update-later').disabled = false;
-  $('#update-later').textContent = noAsset ? 'Schließen' : 'Später';
+  $('#update-later').textContent = noAsset ? t('common.close') : t('update.later');
   $('#update-releases').classList.toggle('is-hidden', false);
   dlg.returnValue = '';
   dlg.showModal();
@@ -184,7 +249,7 @@ async function startUpdateDownload() {
   const now = $('#update-now');
   const later = $('#update-later');
   now.disabled = true;
-  now.textContent = 'Lädt …';
+  now.textContent = t('update.loading');
   later.disabled = true;
   $('#update-progress').classList.remove('is-hidden');
   try {
@@ -192,28 +257,52 @@ async function startUpdateDownload() {
     stateUpdate.assetPath = res.assetPath;
     stateUpdate.downloading = false;
     $('#update-progress-fill').style.width = '100%';
-    $('#update-progress-text').textContent = `Fertig: ${info.asset.name}`;
+    $('#update-progress-text').textContent = t('update.done', { name: info.asset.name });
     $('#update-progress-pct').textContent = fmtGB(res.size);
     now.classList.add('is-hidden');
     const open = $('#update-open');
     open.classList.remove('is-hidden');
     open.disabled = false;
     later.disabled = false;
-    later.textContent = 'Schließen';
+    later.textContent = t('common.close');
   } catch (e) {
     stateUpdate.downloading = false;
     now.disabled = false;
-    now.textContent = 'Erneut versuchen';
+    now.textContent = t('update.retry');
     later.disabled = false;
     $('#update-progress').classList.add('is-hidden');
-    toast(`Download fehlgeschlagen: ${e.message}`, 'error', 9000);
+    toast(t('update.downloadFailed', { message: e.message }), 'error', 9000);
   }
 }
 
 function fitBadge(fit) {
   if (!fit) return '';
   const cls = fit.verdict === 'gpu' ? 'badge-gpu' : fit.verdict === 'hybrid' ? 'badge-hybrid' : fit.verdict === 'ram' ? 'badge-ram' : 'badge-big';
-  return `<span class="badge ${cls}" title="${esc(fit.detail)}">${esc(fit.label)}</span>`;
+  return `<span class="badge ${cls}" title="${esc(fitDetail(fit))}">${esc(fitLabel(fit))}</span>`;
+}
+
+// Übersetzte Fit-Texte: Deutsch kommt aus dem Main-Prozess, Englisch wird aus den Messwerten gebaut
+const FIT_KEYS = { gpu: 'gpu', hybrid: 'hybrid', ram: 'ram', 'too-big': 'tooBig' };
+
+function fitLabel(fit) {
+  const key = FIT_KEYS[fit && fit.verdict];
+  return key ? t(`fit.${key}.label`, null, fit.label) : (fit && fit.label) || '';
+}
+
+function fitDetail(fit) {
+  if (!fit) return '';
+  const key = FIT_KEYS[fit.verdict];
+  if (!key || i18n.getLang() === 'de') return fit.detail || '';
+  const need = fit.needGB != null ? Number(fit.needGB).toFixed(1) : '?';
+  if (fit.verdict === 'gpu') {
+    const gpus = (state.hw && state.hw.gpus ? state.hw.gpus : []).filter((g) => g.vramGB);
+    const best = gpus.sort((a, b) => b.vramGB - a.vramGB)[0];
+    return t('fit.gpu.detail', { need, vram: fit.vramGB, gpu: best ? best.name : '' });
+  }
+  if (fit.verdict === 'hybrid') return t('fit.hybrid.detail', { need, vram: fit.vramGB });
+  if (fit.verdict === 'ram') return t('fit.ram.detail', { need });
+  const available = Math.max(fit.vramGB || 0, Math.round((fit.ramGB || 8) * 0.75));
+  return t('fit.tooBig.detail', { need, available });
 }
 
 /* --------------------------- Markdown --------------------------- */
@@ -314,22 +403,22 @@ function renderSidebar() {
   const b = state.backends;
   const installed = b && b.installed && b.installed.length ? b.installed : [];
   const el = $('#side-status');
-  if (!hw) { el.innerHTML = '<div class="side-hint">Hardware wird erkannt …</div>'; return; }
+  if (!hw) { el.innerHTML = `<div class="side-hint">${esc(t('sidebar.detecting'))}</div>`; return; }
   const gpu = (hw.gpus || []).filter((g) => g.vramGB).sort((a, b2) => b2.vramGB - a.vramGB)[0];
   const be = installed[0];
   el.innerHTML = `
     <div class="side-block">
-      <div class="side-label">Hardware</div>
-      <div class="side-value">${esc(gpu ? `${gpu.vendor} · ${gpu.vramGB} GB` : 'CPU only')}</div>
+      <div class="side-label">${esc(t('sidebar.hardware'))}</div>
+      <div class="side-value">${esc(gpu ? `${gpu.vendor} · ${gpu.vramGB} GB` : t('sidebar.cpuOnly'))}</div>
       <div class="side-value side-cpu">${esc(hw.cpuModel.replace(/\(R\)|\(TM\)/g, '').replace(/\s+/g, ' '))}</div>
     </div>
     <div class="side-block">
-      <div class="side-label">Backend</div>
-      <div class="side-value"><span class="${be ? 'dot-ok' : 'dot-warn'}"></span>${be ? esc(be.label) : 'nicht eingerichtet'}</div>
+      <div class="side-label">${esc(t('sidebar.backend'))}</div>
+      <div class="side-value"><span class="${be ? 'dot-ok' : 'dot-warn'}"></span>${be ? esc(be.label) : esc(t('sidebar.notConfigured'))}</div>
     </div>
     <div class="side-block">
-      <div class="side-label">Modell</div>
-      <div class="side-value"><span class="${state.server.running ? 'dot-ok' : state.server.starting ? 'dot-warn' : 'dot-off'}"></span>${state.server.running ? esc(basename(state.server.model || '')) : state.server.starting ? 'lädt …' : 'keins geladen'}</div>
+      <div class="side-label">${esc(t('sidebar.model'))}</div>
+      <div class="side-value"><span class="${state.server.running ? 'dot-ok' : state.server.starting ? 'dot-warn' : 'dot-off'}"></span>${state.server.running ? esc(basename(state.server.model || '')) : esc(state.server.starting ? t('sidebar.loading') : t('sidebar.noneLoaded'))}</div>
     </div>`;
 }
 
@@ -339,13 +428,22 @@ function currentPreset() {
   return state.presets.find((p) => p.id === (state.server.preset || state.settings?.lastPreset)) || state.presets[0] || null;
 }
 
+function presetName(p) {
+  return p ? t(`preset.${p.id}.name`, null, p.name) : '';
+}
+
+function presetDescription(p) {
+  return p ? t(`preset.${p.id}.desc`, null, p.description) : '';
+}
+
 function renderPresetSelect() {
   const sel = $('#preset-select');
   if (!sel) return;
   const cur = state.server.preset || state.settings?.lastPreset || 'balanced';
-  sel.innerHTML = state.presets.map((p) => `<option value="${esc(p.id)}">${esc(p.icon)} ${esc(p.name)}</option>`).join('');
+  sel.innerHTML = state.presets.map((p) => `<option value="${esc(p.id)}">${esc(p.icon)} ${esc(presetName(p))}</option>`).join('');
   sel.value = cur;
-  sel.title = (state.presets.find((p) => p.id === cur) || {}).description || '';
+  const curPreset = state.presets.find((p) => p.id === cur);
+  sel.title = curPreset ? presetDescription(curPreset) : '';
 }
 
 function renderChatState() {
@@ -361,9 +459,9 @@ function renderChatState() {
   if (state.server.running) {
     name.textContent = monogram(state.server.model);
   } else if (state.server.starting) {
-    name.textContent = 'Modell wird geladen …';
+    name.textContent = t('chat.modelLoading');
   } else {
-    name.textContent = 'Kein Modell geladen';
+    name.textContent = t('chat.noModel');
   }
 
   const canChat = !!state.server.running && !state.chat.streaming;
@@ -374,14 +472,14 @@ function renderChatState() {
     send.disabled = false;
     send.classList.add('is-stop');
     send.innerHTML = ICON_STOP;
-    send.title = 'Antwort stoppen (Esc)';
+    send.title = t('chat.stopTitle');
   } else {
     send.disabled = !canChat;
     send.classList.remove('is-stop');
     send.innerHTML = ICON_SEND;
-    send.title = 'Senden (Enter)';
+    send.title = t('chat.sendTitle');
   }
-  hint.textContent = state.server.running ? 'Enter = senden · Shift+Enter = neue Zeile' : 'Modell laden, um zu chatten';
+  hint.textContent = state.server.running ? t('chat.enterHint') : t('chat.loadToChat');
   if (empty) empty.style.display = state.chat.messages.length ? 'none' : '';
   if (state.server.running && empty) empty.style.display = 'none';
 
@@ -400,18 +498,18 @@ function renderUnloadBtn() {
   if (state.server.running) {
     btn.className = 'btn btn-danger-ghost';
     btn.disabled = busy;
-    btn.title = 'Modell aus dem Speicher entladen';
-    btn.innerHTML = state.server.unloading ? 'Entlade …' : `${ICON_EJECT} Entladen`;
+    btn.title = t('chat.unloadTitle');
+    btn.innerHTML = state.server.unloading ? esc(t('chat.unloading')) : `${ICON_EJECT} ${esc(t('chat.unload'))}`;
   } else if (state.server.lastModel) {
     btn.className = 'btn btn-ok';
     btn.disabled = busy;
-    btn.title = 'Zuletzt geladenes Modell wieder laden';
-    btn.innerHTML = `${ICON_RELOAD} Letztes Modell laden`;
+    btn.title = t('chat.reloadTitle');
+    btn.innerHTML = `${ICON_RELOAD} ${esc(t('chat.reload'))}`;
   } else {
     btn.className = 'btn btn-danger-ghost';
     btn.disabled = true;
-    btn.title = 'Kein Modell geladen';
-    btn.innerHTML = `${ICON_EJECT} Entladen`;
+    btn.title = t('chat.noModel');
+    btn.innerHTML = `${ICON_EJECT} ${esc(t('chat.unload'))}`;
   }
 }
 
@@ -423,7 +521,7 @@ function monogram(p) {
 
 function reasoningBlock(text) {
   const chars = text.length;
-  return `<details class="reasoning"><summary>Gedankengang · ${chars.toLocaleString('de-DE')} Zeichen</summary><pre>${esc(text)}</pre></details>`;
+  return `<details class="reasoning"><summary>${esc(t('chat.reasoning', { count: chars.toLocaleString(i18n.locale()) }))}</summary><pre>${esc(text)}</pre></details>`;
 }
 
 function addMessage(role, content, { streaming = false } = {}) {
@@ -434,8 +532,8 @@ function addMessage(role, content, { streaming = false } = {}) {
   el.className = `msg msg-${role}`;
   el.innerHTML = `
     <div class="msg-role">${role === 'user'
-      ? '<span class="who-user">Du</span>'
-      : `<span class="who-ai">${esc(state.server.model ? basename(state.server.model).replace(/\.gguf$/i, '') : 'Assistent')}</span>`}</div>
+      ? `<span class="who-user">${esc(t('chat.you'))}</span>`
+      : `<span class="who-ai">${esc(state.server.model ? basename(state.server.model).replace(/\.gguf$/i, '') : t('chat.assistant'))}</span>`}</div>
     <div class="msg-body"></div>
     <div class="msg-actions"></div>`;
   wrap.appendChild(el);
@@ -527,8 +625,8 @@ async function runCompletion() {
       signal: state.chat.abort.signal,
     });
     if (!res.ok) {
-      const t = await res.text();
-      throw new Error(`Server-Fehler ${res.status}: ${t.slice(0, 300)}`);
+      const errBody = await res.text();
+      throw new Error(t('chat.serverError', { status: res.status, body: errBody.slice(0, 300) }));
     }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -567,17 +665,20 @@ async function runCompletion() {
       const genMs = tFirstToken && tLastToken > tFirstToken ? tLastToken - tFirstToken : 0;
       const tps = tokensPerSecond(n, genMs);
       const tpsText = tps ? ` · ${tps.toFixed(1)} tok/s` : '';
-      $('#token-info').textContent =
-        `${usage.prompt_tokens || 0} Prompt-Token · ${n} Antwort-Token${tpsText}`;
+      $('#token-info').textContent = t('chat.tokenInfo', {
+        prompt: usage.prompt_tokens || 0,
+        completion: n,
+        tps: tpsText,
+      });
     }
     addMsgActions(el, full);
   } catch (e) {
     if (e.name === 'AbortError') {
-      body.innerHTML = renderMarkdown(full) + '<p class="muted">— gestoppt —</p>';
+      body.innerHTML = renderMarkdown(full) + `<p class="muted">${esc(t('chat.stopped'))}</p>`;
       if (full) state.chat.messages.push({ role: 'assistant', content: full });
     } else {
       el.classList.add('msg-error');
-      body.textContent = `Fehler: ${e.message}`;
+      body.textContent = t('chat.error', { message: e.message });
       toast(e.message, 'error');
     }
   } finally {
@@ -591,10 +692,10 @@ async function runCompletion() {
 function addMsgActions(msgEl, text) {
   const actions = msgEl.querySelector('.msg-actions');
   if (!actions || !text) return;
-  actions.innerHTML = '<button class="msg-action" data-copy>Kopieren</button>';
+  actions.innerHTML = `<button class="msg-action" data-copy>${esc(t('common.copy'))}</button>`;
   actions.querySelector('[data-copy]').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(text); toast('In die Zwischenablage kopiert', 'ok', 1800); }
-    catch { toast('Kopieren fehlgeschlagen', 'error'); }
+    try { await navigator.clipboard.writeText(text); toast(t('toast.copied'), 'ok', 1800); }
+    catch { toast(t('toast.copyFailed'), 'error'); }
   });
 }
 
@@ -605,12 +706,12 @@ function stopGeneration() {
 /* --------------------------- Server --------------------------- */
 
 async function loadModel(model, { presetOverride } = {}) {
-  if (!model || !model.path) { toast('Modellpfad fehlt', 'error'); return; }
+  if (!model || !model.path) { toast(t('toast.noModelPath'), 'error'); return; }
   if (state.server.running || state.server.starting) {
     const ok = await confirmDialog({
-      title: 'Modell wechseln',
-      message: 'Es ist bereits ein Modell geladen. Entladen und das neue laden?',
-      okLabel: 'Entladen & laden',
+      title: t('chat.switchModelTitle'),
+      message: t('chat.switchModelMessage'),
+      okLabel: t('chat.unloadAndLoad'),
     });
     if (!ok) return;
     await unloadModel(true);
@@ -619,7 +720,7 @@ async function loadModel(model, { presetOverride } = {}) {
   state.server.starting = true;
   renderChatState();
   clearToasts();
-  toast(`Lade ${basename(model.path)} …`, 'info', 8000);
+  toast(t('toast.loading', { file: basename(model.path) }), 'info', 8000);
   try {
     const res = await bridge.server.start({
       modelPath: model.path,
@@ -636,13 +737,13 @@ async function loadModel(model, { presetOverride } = {}) {
     if (res.fit) state.server.fit = res.fit;
     renderChatState();
     renderPresetSelect();
-    toast(`Bereit: ${basename(model.path)}`, 'ok');
+    toast(t('toast.ready', { file: basename(model.path) }), 'ok');
     setView('chat');
     setTimeout(() => $('#input').focus(), 120);
   } catch (e) {
     state.server.starting = false;
     renderChatState();
-    toast(e.message || 'Modell konnte nicht geladen werden', 'error', 9000);
+    toast(e.message || t('toast.loadFailed'), 'error', 9000);
   }
 }
 
@@ -653,7 +754,7 @@ async function unloadModel(silent = false) {
     state.server.unloading = true;
     renderChatState();
     clearToasts();
-    toast('Modell wird entladen …', 'info', 1500);
+    toast(t('toast.unloading'), 'info', 1500);
   }
   try {
     await bridge.server.stop();
@@ -664,13 +765,13 @@ async function unloadModel(silent = false) {
     renderChatState();
     if (!silent) {
       clearToasts();
-      toast('Modell entladen — bereit zum Neuladen', 'ok');
+      toast(t('toast.unloaded'), 'ok');
     }
   } catch (e) {
     state.server.unloading = false;
     renderChatState();
     clearToasts();
-    toast(`Entladen fehlgeschlagen: ${e.message}`, 'error');
+    toast(t('toast.unloadFailed', { message: e.message }), 'error');
   }
 }
 
@@ -688,15 +789,15 @@ function modelCard(entry) {
           <div class="card-title">${esc(entry.name)}</div>
           <div class="card-meta">${esc(entry.params)} · ${esc(entry.family)}${quant ? ' · ' + esc(quant) : ''}</div>
         </div>
-        ${fit.verdict ? fitBadge(fit) : '<span class="badge badge-neutral">unbekannt</span>'}
+        ${fit.verdict ? fitBadge(fit) : `<span class="badge badge-neutral">${esc(t('common.unknown'))}</span>`}
       </div>
-      <div class="card-desc">${esc(entry.blurb)}</div>
-      <div class="fit-note">${esc(fit.detail || '')}</div>
+      <div class="card-desc">${esc(i18n.modelBlurb(entry.repo, entry.blurb))}</div>
+      <div class="fit-note">${esc(fitDetail(fit))}</div>
       <div class="card-foot">
         <span class="card-size">${entry.sizeLabel ? esc(entry.sizeLabel) : '–'}</span>
         ${isLocal
-          ? `<button class="btn btn-primary btn-sm" data-act="load-catalog" data-repo="${esc(entry.repo)}">Chat öffnen</button>`
-          : `<button class="btn btn-primary btn-sm" data-act="download-catalog" data-repo="${esc(entry.repo)}" ${dl ? 'disabled' : ''}>Herunterladen</button>`}
+          ? `<button class="btn btn-primary btn-sm" data-act="load-catalog" data-repo="${esc(entry.repo)}">${esc(t('models.openChat'))}</button>`
+          : `<button class="btn btn-primary btn-sm" data-act="download-catalog" data-repo="${esc(entry.repo)}" ${dl ? 'disabled' : ''}>${esc(t('models.download'))}</button>`}
       </div>
       ${dl ? `<div class="progress"><div class="progress-fill" style="width:${dl.percent || 0}%"></div></div>
               <div class="progress-label"><span>${esc(dl.file || '')}</span><span>${dl.percent ? dl.percent.toFixed(0) + '%' : ''} ${dl.doneBytes ? fmtGB(dl.doneBytes) + ' / ' + fmtGB(dl.totalBytes) : ''}</span></div>` : ''}
@@ -728,7 +829,7 @@ function applyProgress(container, p) {
 function renderCatalog() {
   const grid = $('#catalog-grid');
   if (!state.catalog.length) {
-    grid.innerHTML = '<div class="empty-note">Katalog wird geladen …</div>';
+    grid.innerHTML = `<div class="empty-note">${esc(t('models.catalogLoading'))}</div>`;
     return;
   }
   grid.innerHTML = state.catalog.map(modelCard).join('');
@@ -739,7 +840,7 @@ async function refreshCatalog() {
     state.catalog = await bridge.models.catalog();
     renderCatalog();
   } catch (e) {
-    $('#catalog-grid').innerHTML = `<div class="empty-note">Katalog konnte nicht geladen werden: ${esc(e.message)}</div>`;
+    $('#catalog-grid').innerHTML = `<div class="empty-note">${esc(t('models.catalogError', { message: e.message }))}</div>`;
   }
 }
 
@@ -748,26 +849,26 @@ async function refreshCatalog() {
 async function doSearch() {
   const q = $('#search-input').value.trim();
   if (!q) return;
-  $('#search-results').innerHTML = '<div class="empty-note"><span class="spin" style="display:inline-block"></span> Suche …</div>';
+  $('#search-results').innerHTML = `<div class="empty-note"><span class="spin" style="display:inline-block"></span> ${esc(t('models.searching'))}</div>`;
   try {
     state.searchResults = await bridge.models.search(q);
     renderSearchResults();
   } catch (e) {
-    $('#search-results').innerHTML = `<div class="empty-note">Suche fehlgeschlagen: ${esc(e.message)}</div>`;
+    $('#search-results').innerHTML = `<div class="empty-note">${esc(t('models.searchError', { message: e.message }))}</div>`;
   }
 }
 
 function renderSearchResults() {
   const list = $('#search-results');
-  if (!state.searchResults.length) { list.innerHTML = '<div class="empty-note">Keine Treffer.</div>'; return; }
+  if (!state.searchResults.length) { list.innerHTML = `<div class="empty-note">${esc(t('models.noResults'))}</div>`; return; }
   list.innerHTML = state.searchResults.map((r) => `
     <div class="row">
       <div class="row-main">
         <div class="row-title">${esc(r.repo)}</div>
-        <div class="row-sub">${r.downloads.toLocaleString('de-DE')} Downloads · ${r.likes.toLocaleString('de-DE')} Likes${r.lastModified ? ' · ' + new Date(r.lastModified).toLocaleDateString('de-DE') : ''}</div>
+        <div class="row-sub">${esc(t('models.rowMeta', { downloads: i18n.num(r.downloads), likes: i18n.num(r.likes) }))}${r.lastModified ? ' · ' + new Date(r.lastModified).toLocaleDateString(i18n.locale()) : ''}</div>
       </div>
       <div class="row-actions">
-        <button class="btn btn-ghost btn-sm" data-act="files" data-repo="${esc(r.repo)}">Dateien ansehen</button>
+        <button class="btn btn-ghost btn-sm" data-act="files" data-repo="${esc(r.repo)}">${esc(t('models.showFiles'))}</button>
       </div>
     </div>`).join('');
 }
@@ -776,30 +877,33 @@ async function openFilePanel(repo) {
   const panel = $('#file-panel');
   panel.classList.remove('is-hidden');
   $('#file-panel-title').textContent = repo;
-  $('#file-panel-sub').textContent = 'Lade Dateiliste …';
+  $('#file-panel-sub').textContent = t('models.loadingFiles');
   $('#file-list').innerHTML = '';
   try {
     const info = await bridge.models.files(repo);
     state.filePanel = { repo, ...info };
-    $('#file-panel-sub').textContent = `${info.files.length} Quantisierungen · ${info.downloads?.toLocaleString('de-DE') || '?'} Downloads`;
+    $('#file-panel-sub').textContent = t('models.filePanelSub', {
+      count: info.files.length,
+      downloads: info.downloads != null ? i18n.num(info.downloads) : '?',
+    });
     $('#file-list').innerHTML = info.files.map((f) => {
       const dl = state.downloads.get(`${repo}::${f.name}`);
       return `
       <div class="row">
         <div class="row-main">
           <div class="row-title">${esc(f.name)}</div>
-          <div class="row-sub">${esc(f.quant || 'unbekannt')} · ${esc(f.sizeLabel || fmtGB(f.size))}${f.split ? ' · mehrteilig' : ''}</div>
+          <div class="row-sub">${esc(f.quant || t('common.unknown'))} · ${esc(f.sizeLabel || fmtGB(f.size))}${f.split ? ' · ' + esc(t('models.split')) : ''}</div>
           ${dl ? `<div class="progress"><div class="progress-fill" style="width:${dl.percent || 0}%"></div></div>
                   <div class="progress-label"><span>${esc(dl.file || '')}</span><span>${dl.percent ? dl.percent.toFixed(0) + '%' : ''}</span></div>` : ''}
         </div>
         <div class="row-actions">
           ${fitBadge(f.fit)}
-          <button class="btn btn-primary btn-sm" data-act="download-file" data-repo="${esc(repo)}" data-file="${esc(f.name)}" ${dl ? 'disabled' : ''}>Herunterladen</button>
+          <button class="btn btn-primary btn-sm" data-act="download-file" data-repo="${esc(repo)}" data-file="${esc(f.name)}" ${dl ? 'disabled' : ''}>${esc(t('models.download'))}</button>
         </div>
       </div>`;
     }).join('');
   } catch (e) {
-    $('#file-panel-sub').textContent = `Fehler: ${e.message}`;
+    $('#file-panel-sub').textContent = t('common.error', { message: e.message });
   }
 }
 
@@ -809,7 +913,7 @@ function renderLocal() {
   const list = $('#local-list');
   $('#local-count').textContent = state.local.length ? `(${state.local.length})` : '';
   if (!state.local.length) {
-    list.innerHTML = '<div class="empty-note">Noch keine Modelle heruntergeladen.<br>Stöbere im Katalog oder auf HuggingFace.</div>';
+    list.innerHTML = `<div class="empty-note">${t('models.localEmpty')}</div>`;
     return;
   }
   list.innerHTML = state.local.map((m) => `
@@ -817,13 +921,13 @@ function renderLocal() {
       <div class="row-main">
         <div class="row-title">${esc(m.repo)}</div>
         <div class="row-sub">${esc(m.file)} · ${esc(m.sizeLabel)}${m.quant ? ' · ' + esc(m.quant) : ''}</div>
-        <div class="fit-note" style="margin-top:4px">${esc((m.fit && m.fit.detail) || '')}</div>
+        <div class="fit-note" style="margin-top:4px">${esc(fitDetail(m.fit))}</div>
       </div>
       <div class="row-actions">
         ${fitBadge(m.fit)}
-        <button class="btn btn-primary btn-sm" data-act="load-local" data-id="${esc(m.id)}">Laden</button>
-        <button class="btn btn-ghost btn-sm" data-act="reveal" data-path="${esc(m.path)}" title="Im Ordner zeigen">Ordner</button>
-        <button class="btn btn-danger-ghost btn-sm" data-act="delete-local" data-id="${esc(m.id)}">Löschen</button>
+        <button class="btn btn-primary btn-sm" data-act="load-local" data-id="${esc(m.id)}">${esc(t('models.load'))}</button>
+        <button class="btn btn-ghost btn-sm" data-act="reveal" data-path="${esc(m.path)}" title="${esc(t('models.revealTitle'))}">${esc(t('models.folder'))}</button>
+        <button class="btn btn-danger-ghost btn-sm" data-act="delete-local" data-id="${esc(m.id)}">${esc(t('common.delete'))}</button>
       </div>
     </div>`).join('');
 }
@@ -833,7 +937,7 @@ async function refreshLocal() {
     state.local = await bridge.models.local();
     renderLocal();
   } catch (e) {
-    $('#local-list').innerHTML = `<div class="empty-note">Lokale Modelle konnten nicht gelesen werden: ${esc(e.message)}</div>`;
+    $('#local-list').innerHTML = `<div class="empty-note">${esc(t('models.localError', { message: e.message }))}</div>`;
   }
 }
 
@@ -842,7 +946,7 @@ async function refreshLocal() {
 function renderSetup() {
   const body = $('#setup-body');
   const hw = state.hw;
-  if (!hw) { body.innerHTML = '<div class="empty-note">Hardware wird erkannt …</div>'; return; }
+  if (!hw) { body.innerHTML = `<div class="empty-note">${esc(t('sidebar.detecting'))}</div>`; return; }
   const gpus = hw.gpus || [];
   const npus = hw.npus || [];
   const installed = (state.backends && state.backends.installed) || [];
@@ -853,18 +957,18 @@ function renderSetup() {
   const gpuHtml = gpus.length
     ? gpus.map((g) => `
         <div class="hw-card">
-          <div class="hw-label">Grafik</div>
+          <div class="hw-label">${esc(t('setup.graphics'))}</div>
           <div class="hw-value">${esc(g.name)}</div>
-          <div class="hw-sub">${esc(g.vendor)}${g.vramLabel ? ' · ' + esc(g.vramLabel) + ' VRAM' : ''}${g.vramApprox ? ' (geschätzt)' : ''}${g.driver ? ' · Treiber ' + esc(g.driver) : ''}</div>
+          <div class="hw-sub">${esc(g.vendor)}${g.vramLabel ? ' · ' + esc(t('setup.vram', { label: g.vramLabel })) : ''}${g.vramApprox ? ' ' + esc(t('setup.estimated')) : ''}${g.driver ? ' · ' + esc(t('setup.driver', { version: g.driver })) : ''}</div>
         </div>`).join('')
-    : `<div class="hw-card"><div class="hw-label">Grafik</div><div class="hw-value">Keine GPU erkannt</div><div class="hw-sub">Modelle laufen im Arbeitsspeicher (langsamer).</div></div>`;
+    : `<div class="hw-card"><div class="hw-label">${esc(t('setup.graphics'))}</div><div class="hw-value">${esc(t('setup.noGpu'))}</div><div class="hw-sub">${esc(t('setup.noGpuHint'))}</div></div>`;
 
   const npuHtml = npus.length
     ? `<div class="npu-note">
-        <strong>NPU gefunden:</strong> ${npus.map((n) => esc(n.name)).join(', ')}.
+        <strong>${esc(t('setup.npuFound'))}</strong> ${npus.map((n) => esc(n.name)).join(', ')}.
         ${npus.some((n) => n.usableBy === 'openvino')
-          ? 'Ein OpenVINO-Backend kann sie für kleine Modelle nutzen — als experimentelle Option unten verfügbar.'
-          : 'Für llama.cpp ist sie nicht nutzbar; Chats laufen über GPU/CPU.'}
+          ? esc(t('setup.npuOpenvino'))
+          : esc(t('setup.npuUnusable'))}
       </div>`
     : '';
 
@@ -877,43 +981,59 @@ function renderSetup() {
           <div class="backend-main">
             <div class="backend-name">
               ${esc(b.label)}
-              ${b.recommended ? '<span class="badge badge-gpu">Empfohlen</span>' : ''}
-              ${b.experimental ? '<span class="badge badge-exp">experimentell</span>' : ''}
+              ${b.recommended ? `<span class="badge badge-gpu">${esc(t('setup.recommendedBadge'))}</span>` : ''}
+              ${b.experimental ? `<span class="badge badge-exp">${esc(t('setup.experimentalBadge'))}</span>` : ''}
               ${b.npu ? '<span class="badge badge-exp">NPU</span>' : ''}
-              ${isInst ? '<span class="badge badge-neutral">installiert</span>' : ''}
+              ${isInst ? `<span class="badge badge-neutral">${esc(t('setup.installedBadge'))}</span>` : ''}
             </div>
-            <div class="backend-note">${esc(b.note)}${b.reason ? ' — ' + esc(b.reason) : ''}</div>
+            <div class="backend-note">${esc(i18n.backendNote(b.id, b.note))}${b.reason ? ' — ' + esc(i18n.reasonText(b.reason, b.reason)) : ''}</div>
             ${inst ? `<div class="progress"><div class="progress-fill" style="width:${inst.percent || 0}%"></div></div>
                       <div class="progress-label"><span>${esc(inst.file || inst.phase || '')}</span><span>${inst.percent ? inst.percent.toFixed(0) + '%' : ''}</span></div>` : ''}
           </div>
           <div class="backend-side">
             <span class="card-size">${esc(b.sizeLabel || '')}</span>
             ${isInst
-              ? `<button class="btn btn-ghost btn-sm" data-act="remove-backend" data-id="${esc(b.id)}">Entfernen</button>`
-              : `<button class="btn btn-primary btn-sm" data-act="install-backend" data-id="${esc(b.id)}" ${inst ? 'disabled' : ''}>Installieren</button>`}
+              ? `<button class="btn btn-ghost btn-sm" data-act="remove-backend" data-id="${esc(b.id)}">${esc(t('setup.remove'))}</button>`
+              : `<button class="btn btn-primary btn-sm" data-act="install-backend" data-id="${esc(b.id)}" ${inst ? 'disabled' : ''}>${esc(t('setup.install'))}</button>`}
           </div>
         </div>`;
       }).join('')
-    : `<div class="empty-note">${state.backends && state.backends.error ? 'Backend-Liste nicht verfügbar: ' + esc(state.backends.error) : 'Backend-Liste wird geladen …'}</div>`;
+    : `<div class="empty-note">${state.backends && state.backends.error ? esc(t('setup.backendListError', { message: state.backends.error })) : esc(t('setup.backendListLoading'))}</div>`;
+
+  const langOptions = i18n.LANGS
+    .map((l) => `<option value="${esc(l.id)}" ${l.id === i18n.getLang() ? 'selected' : ''}>${esc(l.label)}</option>`)
+    .join('');
+
+  const onboardingHtml = state.settings && state.settings.onboardingDone === false
+    ? `<section class="setup-section" id="onboarding-card">
+        <h3 class="section-title">${esc(t('setup.welcomeTitle'))}</h3>
+        <div class="settings-row">
+          <div class="settings-label"><strong>${esc(t('setup.language'))}</strong><span>${esc(t('setup.welcomeText'))}</span></div>
+          <select class="select" id="onboard-language" aria-label="${esc(t('setup.language'))}">${langOptions}</select>
+          <button class="btn btn-primary btn-sm" data-act="onboarding-done">${esc(t('setup.welcomeContinue'))}</button>
+        </div>
+      </section>`
+    : '';
 
   body.innerHTML = `
+    ${onboardingHtml}
     <section class="setup-section">
-      <h3 class="section-title">Dein System</h3>
+      <h3 class="section-title">${esc(t('setup.yourSystem'))}</h3>
       <div class="hw-grid">
         <div class="hw-card">
-          <div class="hw-label">System</div>
+          <div class="hw-label">${esc(t('setup.system'))}</div>
           <div class="hw-value">${esc(hw.osName)}</div>
-          <div class="hw-sub">${esc(hw.arch)} · ${esc(hw.cpuCores)} Threads</div>
+          <div class="hw-sub">${esc(hw.arch)} · ${esc(t('setup.threads', { count: hw.cpuCores }))}</div>
         </div>
         <div class="hw-card">
-          <div class="hw-label">Prozessor</div>
+          <div class="hw-label">${esc(t('setup.cpu'))}</div>
           <div class="hw-value">${esc(hw.cpuModel)}</div>
-          <div class="hw-sub">${esc(hw.cpuCores)} Kerne</div>
+          <div class="hw-sub">${esc(t('setup.cores', { count: hw.cpuCores }))}</div>
         </div>
         <div class="hw-card">
-          <div class="hw-label">Arbeitsspeicher</div>
+          <div class="hw-label">${esc(t('setup.memory'))}</div>
           <div class="hw-value">${esc(hw.totalMemGB)} GB</div>
-          <div class="hw-sub">${esc(hw.freeMemGB)} GB frei</div>
+          <div class="hw-sub">${esc(t('setup.freeMem', { size: hw.freeMemGB }))}</div>
         </div>
         ${gpuHtml}
       </div>
@@ -922,32 +1042,39 @@ function renderSetup() {
     </section>
 
     <section class="setup-section">
-      <h3 class="section-title">Backend (llama.cpp)</h3>
+      <h3 class="section-title">${esc(t('setup.backendSection'))}</h3>
       ${recBackend ? `<div class="rec-banner">
         <div class="rec-icon">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h6l-1 8 9-12h-6l1-8Z"></path></svg>
         </div>
-        <div><strong>Empfehlung für deine Hardware: ${esc(recBackend.label)}</strong>
-        <span>${esc(recBackend.reason || recBackend.note)} · ${esc(recBackend.sizeLabel || '')} Download</span></div>
+        <div><strong>${esc(t('setup.recommendation', { name: recBackend.label }))}</strong>
+        <span>${esc(t('setup.recommendationMeta', {
+          reason: i18n.reasonText(recBackend.reason, i18n.backendNote(recBackend.id, recBackend.note)),
+          size: recBackend.sizeLabel || '',
+        }))}</span></div>
       </div>` : ''}
       ${backendCards}
-      ${state.backends && state.backends.release ? `<div class="muted" style="margin-top:8px">llama.cpp ${esc(state.backends.release.tag)} · ${state.backends.installed.length} installiert</div>` : ''}
+      ${state.backends && state.backends.release ? `<div class="muted" style="margin-top:8px">${esc(t('setup.releaseInfo', { tag: state.backends.release.tag, count: state.backends.installed.length }))}</div>` : ''}
     </section>
 
     <section class="setup-section">
-      <h3 class="section-title">Einstellungen</h3>
+      <h3 class="section-title">${esc(t('setup.settings'))}</h3>
       <div class="settings-row">
-        <div class="settings-label"><strong>Modellordner</strong><span>Hierhin werden GGUF-Dateien geladen</span></div>
-        <div class="path-box">${esc(state.settings?.modelsDir || '')}</div>
-        <button class="btn btn-ghost btn-sm" data-act="pick-models">Ändern</button>
-        <button class="btn btn-ghost btn-sm" data-act="open-models">Öffnen</button>
+        <div class="settings-label"><strong>${esc(t('setup.language'))}</strong><span>${esc(t('setup.languageHint'))}</span></div>
+        <select class="select" id="set-language" aria-label="${esc(t('setup.language'))}">${langOptions}</select>
       </div>
       <div class="settings-row">
-        <div class="settings-label"><strong>Kontextgröße</strong><span>Tokens, die das Modell gleichzeitig „sieht“ — höher = mehr VRAM</span></div>
+        <div class="settings-label"><strong>${esc(t('setup.modelsDir'))}</strong><span>${esc(t('setup.modelsDirHint'))}</span></div>
+        <div class="path-box">${esc(state.settings?.modelsDir || '')}</div>
+        <button class="btn btn-ghost btn-sm" data-act="pick-models">${esc(t('setup.change'))}</button>
+        <button class="btn btn-ghost btn-sm" data-act="open-models">${esc(t('setup.open'))}</button>
+      </div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('setup.ctxLabel'))}</strong><span>${esc(t('setup.ctxHint'))}</span></div>
         <input type="number" class="num-input" id="set-ctx" min="1024" max="131072" step="1024" value="${esc(state.settings?.ctx || 8192)}">
       </div>
       <div class="settings-row">
-        <div class="settings-label"><strong>GPU-Layers</strong><span>999 = alles auf die GPU. Bei Speicherproblemen reduzieren.</span></div>
+        <div class="settings-label"><strong>${esc(t('setup.gpuLayersLabel'))}</strong><span>${esc(t('setup.gpuLayersHint'))}</span></div>
         <input type="number" class="num-input" id="set-ngl" min="0" max="999" step="1" value="${esc(state.settings?.gpuLayers ?? 999)}">
       </div>
     </section>`;
@@ -971,9 +1098,9 @@ function bindEvents() {
     try {
       const info = await bridge.update.check();
       if (info.updateAvailable) showUpdateDialog({ ...info, currentVersion: state.info?.version });
-      else toast(`Du bist aktuell (v${state.info?.version || '?'}).`, 'ok', 2600);
+      else toast(t('toast.upToDate', { version: state.info?.version || '?' }), 'ok', 2600);
     } catch (e) {
-      toast(`Update-Check fehlgeschlagen: ${e.message}`, 'error', 6000);
+      toast(t('toast.updateCheckFailed', { message: e.message }), 'error', 6000);
     }
   });
   $('#update-now').addEventListener('click', startUpdateDownload);
@@ -987,7 +1114,7 @@ function bindEvents() {
     }
   });
   $('#btn-rescan').addEventListener('click', async () => {
-    toast('Erkenne Hardware neu …', 'info', 1800);
+    toast(t('toast.rescanning'), 'info', 1800);
     state.hw = await bridge.hw.scan(true);
     state.backends = await bridge.backends.list();
     renderSetup(); renderSidebar(); refreshCatalog();
@@ -999,7 +1126,7 @@ function bindEvents() {
     await bridge.settings.set({ lastPreset: preset });
     if (state.settings) state.settings.lastPreset = preset;
     const p = state.presets.find((x) => x.id === preset);
-    toast(`Preset: ${p ? p.name : preset}`, 'ok', 1800);
+    toast(t('toast.preset', { name: p ? presetName(p) : preset }), 'ok', 1800);
     renderPresetSelect();
     renderChatState();
   });
@@ -1069,7 +1196,7 @@ function bindEvents() {
     if (act === 'load-catalog') {
       const m = state.local.find((l) => l.repo === btn.dataset.repo);
       if (m) loadModel(m);
-      else toast('Modell ist lokal nicht gefunden — bitte neu herunterladen.', 'error');
+      else toast(t('toast.modelMissing'), 'error');
     }
     if (act === 'load-local') {
       const m = state.local.find((l) => l.id === btn.dataset.id);
@@ -1080,15 +1207,15 @@ function bindEvents() {
       const m = state.local.find((l) => l.id === btn.dataset.id);
       if (!m) return;
       const ok = await confirmDialog({
-        title: 'Modell wirklich löschen?',
+        title: t('models.deleteTitle'),
         message: `${m.file}\n${m.sizeLabel}`,
-        okLabel: 'Löschen',
+        okLabel: t('common.delete'),
         danger: true,
       });
       if (!ok) return;
       try {
         await bridge.models.delete(m.id);
-        toast('Modell gelöscht', 'ok');
+        toast(t('toast.modelDeleted'), 'ok');
         await refreshLocal(); refreshCatalog();
       } catch (err) { toast(err.message, 'error'); }
     }
@@ -1100,7 +1227,7 @@ function bindEvents() {
       renderSetup();
       try {
         await bridge.backends.install(id);
-        toast(`Backend installiert: ${id}`, 'ok');
+        toast(t('toast.backendInstalled', { id }), 'ok');
         state.backends = await bridge.backends.list();
         state.backendInstalls.delete(id);
         renderSetup(); renderSidebar();
@@ -1113,9 +1240,9 @@ function bindEvents() {
     if (act === 'remove-backend') {
       const id = btn.dataset.id;
       const ok = await confirmDialog({
-        title: 'Backend entfernen?',
-        message: `Backend ${id} wirklich entfernen?`,
-        okLabel: 'Entfernen',
+        title: t('setup.removeBackendTitle'),
+        message: t('setup.removeBackendMessage', { id }),
+        okLabel: t('setup.remove'),
         danger: true,
       });
       if (!ok) return;
@@ -1130,9 +1257,13 @@ function bindEvents() {
       if (!dir) return;
       state.settings = await bridge.settings.set({ modelsDir: dir });
       renderSetup();
-      toast('Modellordner geändert', 'ok');
+      toast(t('toast.modelsDirChanged'), 'ok');
     }
     if (act === 'open-models') { bridge.shell.showModels(); }
+    if (act === 'onboarding-done') {
+      state.settings = await bridge.settings.set({ onboardingDone: true });
+      renderSetup();
+    }
   });
 
   // Settings-Inputs (delegiert, weil neu gerendert)
@@ -1140,13 +1271,16 @@ function bindEvents() {
     if (e.target.id === 'set-ctx') {
       const val = Math.max(1024, parseInt(e.target.value, 10) || 8192);
       state.settings = await bridge.settings.set({ ctx: val });
-      toast(`Kontext: ${val} Tokens`, 'ok', 1800);
+      toast(t('toast.ctx', { value: val }), 'ok', 1800);
       refreshCatalog();
     }
     if (e.target.id === 'set-ngl') {
       const val = Math.max(0, parseInt(e.target.value, 10) || 0);
       state.settings = await bridge.settings.set({ gpuLayers: val });
-      toast(`GPU-Layers: ${val}`, 'ok', 1800);
+      toast(t('toast.gpuLayers', { value: val }), 'ok', 1800);
+    }
+    if (e.target.id === 'set-language' || e.target.id === 'onboard-language') {
+      await setLanguage(e.target.value);
     }
   });
 
@@ -1159,12 +1293,12 @@ function bindEvents() {
       setTimeout(async () => {
         state.downloads.delete(p.downloadId);
         await refreshLocal(); refreshCatalog();
-        toast('Download abgeschlossen', 'ok');
+        toast(t('toast.downloadDone'), 'ok');
         setTab('local');
       }, 500);
     } else if (p.phase === 'error') {
       state.downloads.delete(p.downloadId);
-      toast(p.message || 'Download fehlgeschlagen', 'error', 8000);
+      toast(p.message || t('toast.downloadFailed'), 'error', 8000);
       renderCatalog();
     } else {
       // Gezielt nur die betroffene Karte/Zeile aktualisieren (kein Voll-Rerender)
@@ -1197,7 +1331,9 @@ function bindEvents() {
     if (pctEl) pctEl.textContent = `${pct.toFixed(pct < 10 ? 1 : 0).replace('.', ',')} %`;
     const txt = $('#update-progress-text');
     if (txt) {
-      txt.textContent = p.doneBytes ? `${fmtGB(p.doneBytes)} von ${fmtGB(p.totalBytes)}` : 'Wird heruntergeladen …';
+      txt.textContent = p.doneBytes
+        ? t('update.progressOf', { done: fmtGB(p.doneBytes), total: fmtGB(p.totalBytes) })
+        : t('update.downloading');
     }
   });
 
@@ -1238,7 +1374,7 @@ async function startDownload(repo, file, btn) {
     state.downloads.delete(id);
     await refreshLocal();
     await refreshCatalog();
-    toast(`Fertig: ${result.file} (${result.sizeLabel})`, 'ok', 5000);
+    toast(t('toast.downloadFinished', { file: result.file, size: result.sizeLabel }), 'ok', 5000);
     setTab('local');
   } catch (err) {
     state.downloads.delete(id);
@@ -1270,6 +1406,8 @@ async function init() {
   try {
     state.info = await bridge.info();
     state.settings = await bridge.settings.get();
+    i18n.setLang(state.settings && state.settings.language ? state.settings.language : i18n.DEFAULT_LANG);
+    applyStaticText();
     state.presets = await bridge.presets();
     renderPresetSelect();
 
@@ -1295,7 +1433,7 @@ async function init() {
       if (state.view === 'setup') renderSetup();
       if (!b.installed || !b.installed.length) {
         setView('setup');
-        toast('Willkommen! Richte zuerst ein Backend für deine Hardware ein.', 'info', 7000);
+        toast(t('toast.welcome'), 'info', 7000);
       }
     }).catch((e) => {
       state.backends = { available: [], installed: [], error: e.message };
@@ -1304,7 +1442,7 @@ async function init() {
 
     state.booted = true;
   } catch (e) {
-    toast(`Startfehler: ${e.message}`, 'error', 10000);
+    toast(t('toast.startError', { message: e.message }), 'error', 10000);
   }
 }
 

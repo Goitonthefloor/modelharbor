@@ -13,11 +13,12 @@ URL = "file:///home/gregerr/workspace/modelharbor/ui/index.html"
 
 API_MOCK = """
 window.__apiCalls = [];
+window.__settingsCalls = [];
 window.api = {
   info: async () => ({ version: '1.0.0', name: 'ModelHarbor' }),
   settings: {
-    get: async () => ({ modelsDir: '/tmp/models', ctx: 8192, gpuLayers: 999, lastPreset: 'balanced' }),
-    set: async (p) => ({ modelsDir: '/tmp/models', ctx: 8192, gpuLayers: 999, lastPreset: 'balanced', ...p }),
+    get: async () => ({ modelsDir: '/tmp/models', ctx: 8192, gpuLayers: 999, lastPreset: 'balanced', onboardingDone: false, language: 'de' }),
+    set: async (p) => { window.__settingsCalls.push(p); return { modelsDir: '/tmp/models', ctx: 8192, gpuLayers: 999, lastPreset: 'balanced', onboardingDone: false, language: 'de', ...p }; },
   },
   presets: async () => ([{ id: 'balanced', name: 'Balanced', icon: '⚖', description: 'Standard', systemPrompt: '', sampling: {} }]),
   server: {
@@ -253,6 +254,50 @@ with sync_playwright() as p:
     page.wait_for_timeout(200)
     upd_check = page.evaluate("[...document.querySelectorAll('#toast-wrap .toast-msg')].map(t => t.textContent)")
     check("Manueller Check: 'Du bist aktuell'-Toast", any("aktuell" in t for t in upd_check), str(upd_check))
+
+    # 15) i18n: Default Deutsch, Sprachwechsel im Setup wirkt sofort
+    page.evaluate("setView('setup')")
+    page.wait_for_timeout(200)
+    i18n_de = page.evaluate("""() => {
+      const sel = document.querySelector('#set-language');
+      const onboard = document.querySelector('#onboard-language');
+      const titles = [...document.querySelectorAll('#setup-body .section-title')].map(e => e.textContent.trim());
+      return { lang: document.documentElement.lang, sel: sel ? sel.value : null,
+               onboard: onboard ? onboard.value : null, titles };
+    }""")
+    check("i18n: Default Deutsch + Sprachauswahl vorhanden",
+          i18n_de["lang"] == "de" and i18n_de["sel"] == "de" and i18n_de["onboard"] == "de"
+          and "Einstellungen" in i18n_de["titles"] and "Willkommen bei ModelHarbor" in i18n_de["titles"],
+          json.dumps(i18n_de, ensure_ascii=False))
+
+    page.select_option("#set-language", "en")
+    page.wait_for_timeout(300)
+    i18n_en = page.evaluate("""() => {
+      const nav = [...document.querySelectorAll('.nav-item span')].map(e => e.textContent.trim());
+      const titles = [...document.querySelectorAll('#setup-body .section-title')].map(e => e.textContent.trim());
+      return { lang: document.documentElement.lang, nav, titles,
+               hint: document.querySelector('#composer-hint').textContent.trim(),
+               modelsTitle: document.querySelector('#view-models h1').textContent.trim(),
+               calls: window.__settingsCalls.filter(c => c.language) };
+    }""")
+    check("i18n: Sprachwechsel auf Englisch rendert sofort um",
+          i18n_en["lang"] == "en" and i18n_en["nav"] == ["Chat", "Models", "Setup"]
+          and "Settings" in i18n_en["titles"] and "Your system" in i18n_en["titles"]
+          and i18n_en["modelsTitle"] == "Models"
+          and i18n_en["hint"] == "Load a model to start chatting"
+          and any(c["language"] == "en" for c in i18n_en["calls"]),
+          json.dumps(i18n_en, ensure_ascii=False))
+
+    page.select_option("#set-language", "de")
+    page.wait_for_timeout(300)
+    i18n_back = page.evaluate("""() => {
+      const nav = [...document.querySelectorAll('.nav-item span')].map(e => e.textContent.trim());
+      return { lang: document.documentElement.lang, nav, calls: window.__settingsCalls.filter(c => c.language) };
+    }""")
+    check("i18n: Rueckwechsel auf Deutsch",
+          i18n_back["lang"] == "de" and i18n_back["nav"] == ["Chat", "Modelle", "Einrichtung"]
+          and any(c["language"] == "de" for c in i18n_back["calls"]),
+          json.dumps(i18n_back, ensure_ascii=False))
 
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))

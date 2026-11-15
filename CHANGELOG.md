@@ -2,6 +2,20 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.2.1] - 2026-11-15
+
+### Added
+
+- **Englische Oberfläche über Sprachauswahl (Deutsch/Englisch).** Die Sprache
+  lässt sich beim ersten Start im Einrichtungs-Workflow und jederzeit im
+  Einstellungsbereich des Setup-Views umschalten. Der Wechsel wirkt sofort
+  ohne Neustart: alle statischen Texte, Dialoge, Toasts, Preset-Namen,
+  Modellkarten und Fit-Badges werden neu gerendert.
+- Die gewählte Sprache wird in `settings.json` (`language`) gespeichert und
+  beim Start wieder geladen; unbekannte Werte fallen auf Deutsch zurück.
+- Fehlermeldungen aus dem Main-Prozess (laufender Download, fehlendes Backend,
+  laufender Update-Download) folgen der gewählten Sprache.
+
 ## [1.0.1] - 2026-11-14
 
 ### Security

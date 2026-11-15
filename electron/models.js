@@ -4,6 +4,7 @@
  */
 const fs = require('fs');
 const fsp = require('fs/promises');
+const i18n = require('../ui/i18n');
 const path = require('path');
 const https = require('https');
 const { pipeline } = require('stream/promises');
@@ -110,14 +111,14 @@ function getJson(url, timeoutMs = 20000) {
       res.on('data', (c) => { body += c; });
       res.on('end', () => {
         if (res.statusCode === 401 || res.statusCode === 403) {
-          reject(new Error('Dieses Modell ist bei HuggingFace eingeschränkt (Login/AGB nötig). Bitte ein anderes Modell wählen.'));
+          reject(new Error(i18n.t('error.hfRestricted')));
           return;
         }
         if (res.statusCode !== 200) { reject(new Error(`HuggingFace antwortet mit HTTP ${res.statusCode}`)); return; }
-        try { resolve(JSON.parse(body)); } catch { reject(new Error('Ungültige Antwort von HuggingFace')); }
+        try { resolve(JSON.parse(body)); } catch { reject(new Error(i18n.t('error.hfInvalidResponse'))); }
       });
     });
-    req.on('timeout', () => req.destroy(new Error('Zeitüberschreitung bei HuggingFace')));
+    req.on('timeout', () => req.destroy(new Error(i18n.t('error.hfTimeout'))));
     req.on('error', reject);
   });
 }
@@ -145,12 +146,12 @@ function downloadFile(url, dest, onProgress) {
       if (res.statusCode === 416 && start > 0) { res.resume(); resolve({ bytes: start, alreadyComplete: true }); return; }
       if (res.statusCode === 401 || res.statusCode === 403) {
         res.resume();
-        reject(new Error('Download verweigert — dieses Repo ist bei HuggingFace eingeschränkt.'));
+        reject(new Error(i18n.t('error.downloadRefused')));
         return;
       }
       if (res.statusCode !== 200 && res.statusCode !== 206) {
         res.resume();
-        reject(new Error(`Download fehlgeschlagen: HTTP ${res.statusCode}`));
+        reject(new Error(i18n.t('error.downloadFailedHttp', { status: res.statusCode })));
         return;
       }
       const total = res.headers['content-length'] ? parseInt(res.headers['content-length'], 10) + (res.statusCode === 206 ? start : 0) : null;
@@ -162,7 +163,7 @@ function downloadFile(url, dest, onProgress) {
       });
       pipeline(res, out).then(() => resolve({ bytes: received, total })).catch(reject);
     });
-    req.on('timeout', () => req.destroy(new Error('Zeitüberschreitung beim Download')));
+    req.on('timeout', () => req.destroy(new Error(i18n.t('error.downloadTimeout'))));
     req.on('error', reject);
   });
 }
@@ -302,25 +303,26 @@ function evaluateFit(sizeBytes, fileName, hw, ctx) {
   const ram = hw.totalMemGB || 8;
 
   let verdict, label, detail, gpuLayers;
+  const need = needGB.toFixed(1);
   if (vram && needGB <= vram * 0.9) {
     verdict = 'gpu';
-    label = 'Passt in den VRAM';
-    detail = `~${needGB.toFixed(1)} GB von ${vram} GB VRAM — läuft komplett auf der GPU (${best.name}).`;
+    label = i18n.t('fit.gpu.label');
+    detail = i18n.t('fit.gpu.detail', { need, vram, gpu: best.name });
     gpuLayers = 999;
   } else if (vram && needGB <= vram * 1.9 && needGB <= ram * 0.8) {
     verdict = 'hybrid';
-    label = 'Teilweise auf GPU';
-    detail = `~${needGB.toFixed(1)} GB — zu groß für die ${vram} GB VRAM, aber mit Offload auf den Arbeitsspeicher nutzbar (langsamer).`;
+    label = i18n.t('fit.hybrid.label');
+    detail = i18n.t('fit.hybrid.detail', { need, vram });
     gpuLayers = 999; // llama.cpp offloadet so viel wie möglich, Rest CPU
   } else if (needGB <= ram * 0.75) {
     verdict = 'ram';
-    label = 'Läuft im Arbeitsspeicher';
-    detail = `~${needGB.toFixed(1)} GB — ohne GPU-Beschleunigung, spürbar langsamer.`;
+    label = i18n.t('fit.ram.label');
+    detail = i18n.t('fit.ram.detail', { need });
     gpuLayers = 0;
   } else {
     verdict = 'too-big';
-    label = 'Zu groß';
-    detail = `~${needGB.toFixed(1)} GB benötigt, aber nur ${Math.max(vram, Math.round(ram * 0.75))} GB verfügbar. Nimm einen kleineren Quant oder ein kleineres Modell.`;
+    label = i18n.t('fit.tooBig.label');
+    detail = i18n.t('fit.tooBig.detail', { need, available: Math.max(vram, Math.round(ram * 0.75)) });
     gpuLayers = 0;
   }
   return { verdict, label, detail, needGB: Math.round(needGB * 10) / 10, gpuLayers, vramGB: vram || null, ramGB: ram };
@@ -352,6 +354,7 @@ async function catalogWithFit(hw) {
     const fit = best ? evaluateFit(best.size, best.name, hw, 8192) : null;
     out.push({
       ...entry,
+      blurb: i18n.t(`modelBlurb.${entry.repo}`, null, entry.blurb),
       file: best,
       files,
       fit,
@@ -375,7 +378,7 @@ async function catalogWithFit(hw) {
 async function downloadModel({ repo, file, modelsDir, onProgress = () => {}, downloadId = null }) {
   const info = await modelFiles(repo);
   const entry = info.files.find((f) => f.name === file);
-  if (!entry) throw new Error(`Datei ${file} wurde im Repo nicht gefunden`);
+  if (!entry) throw new Error(i18n.t('error.fileNotInRepo', { file }));
   const parts = entry.parts && entry.parts.length ? entry.parts : [entry.name];
   const folder = path.join(modelsDir, repo.replace(/[\\/]/g, '__'));
   await fsp.mkdir(folder, { recursive: true });
@@ -401,7 +404,10 @@ async function downloadModel({ repo, file, modelsDir, onProgress = () => {}, dow
     if (res.alreadyComplete || (res.bytes && size && res.bytes === size)) {
       try { await fsp.rename(partPath, finalPath); } catch { /* existiert schon */ }
     } else if (size && res.bytes !== size) {
-      throw new Error(`Download unvollständig: ${(res.bytes / 1073741824).toFixed(2)} GB von ${(size / 1073741824).toFixed(2)} GB — bitte erneut starten (wird fortgesetzt).`);
+      throw new Error(i18n.t('error.downloadIncomplete', {
+        got: (res.bytes / 1073741824).toFixed(2),
+        expected: (size / 1073741824).toFixed(2),
+      }));
     } else {
       try { await fsp.rename(partPath, finalPath); } catch { /* ignore */ }
     }
@@ -462,7 +468,7 @@ async function listLocal(modelsDir) {
 async function deleteModel(modelsDir, modelId) {
   const [dirName] = modelId.split('/');
   const dirPath = path.join(modelsDir, dirName);
-  if (!path.resolve(dirPath).startsWith(path.resolve(modelsDir))) throw new Error('Ungültiger Pfad');
+  if (!path.resolve(dirPath).startsWith(path.resolve(modelsDir))) throw new Error(i18n.t('error.invalidPath'));
   await fsp.rm(dirPath, { recursive: true, force: true });
 }
 

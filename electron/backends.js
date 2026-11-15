@@ -12,6 +12,7 @@ const https = require('https');
 const { pipeline } = require('stream/promises');
 const yauzl = require('yauzl');
 const tar = require('tar');
+const i18n = require('../ui/i18n');
 
 const RELEASES_API = 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=25';
 
@@ -176,10 +177,10 @@ function getJson(url, timeoutMs = 20000) {
       res.setEncoding('utf8');
       res.on('data', (c) => { body += c; });
       res.on('end', () => {
-        try { resolve(JSON.parse(body)); } catch (e) { reject(new Error('Ungültige JSON-Antwort von GitHub')); }
+        try { resolve(JSON.parse(body)); } catch (e) { reject(new Error(i18n.t('error.githubInvalidJson'))); }
       });
     });
-    req.on('timeout', () => req.destroy(new Error('Zeitüberschreitung bei GitHub')));
+    req.on('timeout', () => req.destroy(new Error(i18n.t('error.githubTimeout'))));
     req.on('error', reject);
   });
 }
@@ -236,12 +237,12 @@ let releaseCache = null;
 async function latestRelease() {
   if (releaseCache && Date.now() - releaseCache.fetchedAt < 30 * 60 * 1000) return releaseCache;
   const releases = await getJson(RELEASES_API);
-  if (!Array.isArray(releases)) throw new Error('GitHub-API lieferte keine Release-Liste');
+  if (!Array.isArray(releases)) throw new Error(i18n.t('error.noReleaseList'));
   // Neuester Build mit echten Binär-Assets (die "latest"-Releases enthalten teils nur Tags)
   const withAssets = releases
     .filter((r) => Array.isArray(r.assets) && r.assets.length >= 5)
     .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
-  if (!withAssets.length) throw new Error('Kein llama.cpp-Build mit Binärdateien gefunden');
+  if (!withAssets.length) throw new Error(i18n.t('error.noLlamaBuild'));
   const rel = withAssets[0];
   releaseCache = {
     fetchedAt: Date.now(),
@@ -260,12 +261,12 @@ async function latestRelease() {
 
 function resolveAssets(release, backendId) {
   const def = BACKENDS[backendId];
-  if (!def) throw new Error(`Unbekanntes Backend: ${backendId}`);
+  if (!def) throw new Error(i18n.t('error.backendUnknown', { id: backendId }));
   const resolved = [];
   for (const rule of def.assets) {
     const asset = release.assets.find((a) => rule.match.test(a.name));
     if (asset) resolved.push({ ...asset, required: rule.required });
-    else if (rule.required) throw new Error(`Asset für ${def.label} fehlt im Release ${release.tag} (${rule.match})`);
+    else if (rule.required) throw new Error(i18n.t('error.assetMissing', { label: def.label, tag: release.tag, match: rule.match }));
   }
   return resolved;
 }
@@ -291,7 +292,7 @@ function availableBackends(hw, release) {
       return {
         id,
         label: d.label,
-        note: d.note,
+        note: i18n.t(`backendNote.${id}`, null, d.note),
         experimental: !!d.experimental,
         npu: !!d.npu,
         sizeBytes: size,
@@ -379,9 +380,9 @@ async function findServerBinary(dir) {
 
 async function installBackend(backendId, { installRoot, onProgress = () => {} }) {
   const def = BACKENDS[backendId];
-  if (!def) throw new Error(`Unbekanntes Backend: ${backendId}`);
+  if (!def) throw new Error(i18n.t('error.backendUnknown', { id: backendId }));
   if (def.platform !== process.platform || def.arch !== process.arch) {
-    throw new Error(`${def.label} passt nicht zu dieser Plattform (${process.platform}/${process.arch})`);
+    throw new Error(i18n.t('error.platformMismatch', { label: def.label, platform: process.platform, arch: process.arch }));
   }
   const release = await latestRelease();
   const assets = resolveAssets(release, backendId);
@@ -445,7 +446,7 @@ async function installBackend(backendId, { installRoot, onProgress = () => {} })
   await fsp.rm(tmpDir, { recursive: true, force: true });
 
   const serverPath = await findServerBinary(targetDir);
-  if (!serverPath) throw new Error('llama-server wurde im entpackten Paket nicht gefunden');
+  if (!serverPath) throw new Error(i18n.t('error.serverNotFound'));
 
   const manifest = {
     id: backendId,
@@ -482,7 +483,7 @@ async function listInstalled(installRoot) {
 
 async function removeBackend(installRoot, backendId) {
   const dir = path.join(installRoot, backendId);
-  if (!dir.startsWith(installRoot)) throw new Error('Ungültiger Pfad');
+  if (!dir.startsWith(installRoot)) throw new Error(i18n.t('error.invalidPath'));
   await fsp.rm(dir, { recursive: true, force: true });
 }
 

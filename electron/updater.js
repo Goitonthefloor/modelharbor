@@ -6,6 +6,7 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const i18n = require('../ui/i18n');
 
 const DEFAULT_REPO = 'Goitonthefloor/modelharbor';
 const API = 'https://api.github.com';
@@ -95,10 +96,10 @@ async function checkForUpdate({ currentVersion, repo = DEFAULT_REPO, platform = 
 /* --------------------------- Download mit Fortschritt --------------------------- */
 
 async function downloadFile(url, destPath, onProgress = () => {}) {
-  if (!/^https?:\/\//i.test(url)) throw new Error('Ungültige Download-URL');
+  if (!/^https?:\/\//i.test(url)) throw new Error(i18n.t('error.invalidDownloadUrl'));
   await fsp.mkdir(path.dirname(destPath), { recursive: true });
   const res = await fetch(url, { headers: { 'User-Agent': 'ModelHarbor' } });
-  if (!res.ok || !res.body) throw new Error(`Download fehlgeschlagen (HTTP ${res.status})`);
+  if (!res.ok || !res.body) throw new Error(i18n.t('error.updateDownloadFailed', { status: res.status }));
   const total = Number(res.headers.get('content-length')) || 0;
   let done = 0;
   let lastEmit = 0;

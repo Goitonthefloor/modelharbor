@@ -10,6 +10,7 @@ const models = require('./models');
 const server = require('./server');
 const updater = require('./updater');
 const { PRESETS } = require('./presets');
+const i18n = require('../ui/i18n');
 
 const isDev = !app.isPackaged;
 let win = null;
@@ -46,6 +47,7 @@ function loadSettings() {
   } catch {
     settings = defaults;
   }
+  i18n.setLang(settings.language);
   for (const d of [settings.modelsDir, settings.backendsDir]) {
     try { fs.mkdirSync(d, { recursive: true }); } catch { /* ignore */ }
   }
@@ -54,6 +56,7 @@ function loadSettings() {
 
 async function saveSettings(patch) {
   settings = { ...(settings || defaultSettings()), ...patch };
+  i18n.setLang(settings.language);
   const file = path.join(userDataDir(), 'settings.json');
   await fsp.mkdir(path.dirname(file), { recursive: true });
   await fsp.writeFile(file, JSON.stringify(settings, null, 2), 'utf8');
@@ -194,7 +197,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('models:download', async (_e, { repo, file }) => {
-    if (activeDownload) throw new Error('Es läuft bereits ein Download. Bitte warten, bis er fertig ist.');
+    if (activeDownload) throw new Error(i18n.t('error.downloadRunning'));
     activeDownload = { repo, file, startedAt: Date.now() };
     const downloadId = `${repo}::${file}`;
     const onProgress = throttle((p) => send('download:progress', p), 120);
@@ -233,7 +236,7 @@ function registerIpc() {
     const installed = await backends.listInstalled(settings.backendsDir);
     const wanted = opts.backendId || (hwCache && hwCache.recommendation ? hwCache.recommendation.primary : null);
     let backend = installed.find((b) => b.id === wanted) || installed[0];
-    if (!backend) throw new Error('Kein Backend installiert. Bitte zuerst im Setup ein Backend einrichten.');
+    if (!backend) throw new Error(i18n.t('error.noBackend'));
     const result = await server.startServer({
       serverPath: backend.serverPath,
       modelPath: opts.modelPath,
@@ -271,7 +274,7 @@ function registerIpc() {
     updater.checkForUpdate({ currentVersion: app.getVersion(), platform: process.platform }));
 
   ipcMain.handle('update:download', async (_e, { url, name }) => {
-    if (activeUpdate) throw new Error('Ein Update-Download läuft bereits.');
+    if (activeUpdate) throw new Error(i18n.t('error.updateRunning'));
     activeUpdate = { startedAt: Date.now() };
     const onProgress = throttle((p) => send('update:progress', p), 150);
     try {
