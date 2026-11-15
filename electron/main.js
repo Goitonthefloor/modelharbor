@@ -17,6 +17,7 @@ let win = null;
 let hwCache = null;
 let hwCacheTime = 0;
 let activeDownload = null;
+let activeUpdate = null;
 
 /* --------------------------- Settings --------------------------- */
 

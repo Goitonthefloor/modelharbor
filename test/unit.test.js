@@ -260,3 +260,16 @@ test('pickAsset: kein passendes Asset liefert null', () => {
   assert.equal(pickAsset([{ name: 'readme.txt' }], 'linux'), null);
   assert.equal(pickAsset([], 'linux'), null);
 });
+
+/* --- Regression: update:download nutzt deklarierte Zustandsvariable -------- */
+
+test('main.js deklariert activeUpdate für den update:download-Handler', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  // Ohne Deklaration wirft der Handler unter 'use strict' einen ReferenceError
+  assert.match(src, /^let activeUpdate = null;$/m, 'activeUpdate ist deklariert');
+  assert.match(src, /if \(activeUpdate\) throw new Error\(i18n\.t\('error\.updateRunning'\)\);/, 'Guard nutzt activeUpdate');
+  assert.match(src, /activeUpdate = \{ startedAt: Date\.now\(\) \};/, 'Handler setzt activeUpdate');
+  assert.match(src, /activeUpdate = null;/, 'Handler räumt activeUpdate wieder auf');
+});
