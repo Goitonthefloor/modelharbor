@@ -2,6 +2,39 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.3.0] - 2026-11-16
+
+### Fixed
+
+- **Download-Button reagierte nicht**, wenn ein Modell keine herunterladbare
+  Datei bot („not available“) oder nicht gefunden wurde: der Katalog-Handler
+  brach stillschweigend ab. Jetzt erscheint eine klare Fehlermeldung und der
+  Button wird deaktiviert — auch bei fehlender `file`-Referenz im
+  Dateipanel-Download.
+- **AMD-integrierte GPUs und Intel-Arc-dGPUs falsch klassifiziert.** Bisher
+  galt nur Intel generell als „integriert“, wodurch AMD-APU-iGPUs
+  (Radeon 6xxM/7xxM/8xxM, Renoir/Phoenix/Cezanne/…) fälschlich als diskret und
+  Intel-Arc-Karten fälschlich als integriert erschienen. Neue, hersteller- und
+  namensbasierte Klassifikation (`isIntegrated`) korrigiert die Anzeige und den
+  Hardware-Mismatch in der Einrichtung.
+- **Modell-Budget basierte auf dem iGPU-VRAM** geteilter Speicher. Bei reinen
+  APU-Systemen wird das Budget jetzt aus dem System-RAM berechnet und klar als
+  „integrierte GPU, geteilter Speicher“ ausgewiesen.
+- **Nutzbarkeit des Test-Skripts:** `npm test` nutzt jetzt explizite Glob-Pfade
+  statt `node --test test/`, das in der gebündelten Node-Version fehlschlug.
+
+### Added
+
+- **AMD-NPUs klar benannt:** werden nicht über ROCm/llama.cpp, sondern über die
+  Ryzen-AI-Software (ONNX-Runtime) angesprochen. Die Einrichtung zeigt dafür
+  einen eigenen Hinweistext, statt irreführend „experimentell“ zu melden.
+- 6 neue Unit-Tests zur integrated/discrete-Klassifikation
+  (`test/unit.test.js`, `isIntegrated`).
+
+### Changed
+
+- `npm test`: 43 Unit-Tests (vorher 37) + 23 UI-Smoke-Checks, alle grün.
+
 ## [1.2.2] - 2026-11-15
 
 ### Fixed

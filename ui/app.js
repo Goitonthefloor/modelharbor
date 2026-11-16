@@ -968,7 +968,9 @@ function renderSetup() {
         <strong>${esc(t('setup.npuFound'))}</strong> ${npus.map((n) => esc(n.name)).join(', ')}.
         ${npus.some((n) => n.usableBy === 'openvino')
           ? esc(t('setup.npuOpenvino'))
-          : esc(t('setup.npuUnusable'))}
+          : npus.some((n) => n.usableBy === 'ryzenai')
+            ? esc(t('setup.npuRyzenai'))
+            : esc(t('setup.npuUnusable'))}
       </div>`
     : '';
 
@@ -1187,10 +1189,25 @@ function bindEvents() {
     if (act === 'download-catalog') {
       const repo = btn.dataset.repo;
       const entry = state.catalog.find((c) => c.repo === repo);
-      if (!entry || !entry.file) return;
+      if (!entry) {
+        toast(t('toast.modelUnavailable', { repo }), 'error', 7000);
+        if (btn) btn.disabled = true;
+        return;
+      }
+      if (!entry.file) {
+        // Kein Download, wenn keine nutzbare Datei (Bad Connection / nicht verfügbar):
+        // dem User sichtbar melden statt still zu schweigen.
+        toast(t('toast.fileUnavailable', { repo: entry.name || repo }), 'error', 8000);
+        if (btn) btn.disabled = true;
+        return;
+      }
       startDownload(repo, entry.file.name, btn);
     }
     if (act === 'download-file') {
+      if (!btn?.dataset?.file) {
+        toast(t('toast.fileUnavailable', { repo: btn?.dataset?.repo || '' }), 'error', 8000);
+        return;
+      }
       startDownload(btn.dataset.repo, btn.dataset.file, btn);
     }
     if (act === 'load-catalog') {

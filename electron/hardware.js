@@ -56,6 +56,30 @@ function vendorFromPciId(id) {
   return GPU_VENDORS[v] || null;
 }
 
+/**
+ * Unterscheidet integrierte von diskreten GPUs anhand des Herstellers und des
+ * erkannten Namens. Frueher wurde nur Intel als "integrated" behandelt, was
+ * AMD-APU-iGPUs (Radeon 6xxM/7xxM/8xxM, Renoir/Phoenix/Cezanne/...) faelschlich
+ * als diskret und Intel-Arc-dGPUs faelschlich als integriert klassifiziert hat.
+ */
+function isIntegrated(vendor, desc) {
+  const d = String(desc || '');
+  if (vendor === 'NVIDIA') return false;
+  if (vendor === 'Intel') {
+    // Arc sind echte dGPUs; alle HD/Iris/UHD sind im Normal-/Teilfall integriert.
+    if (/intel\s*arc|arc\s*(?:\(.*?\))?\s*(?:a?[0-9]\s*)?[0-9]/i.test(d)) return false;
+    return true;
+  }
+  if (vendor === 'AMD') {
+    if (/radeon rx|navi\s*[0-9]|vega\s*(10|20|\d{2})|radeon vii|\bpro\b|workstation/i.test(d)) return false;
+    // APU-Codenamen / "Radeon ... Graphics" ohne RX -> integriert.
+    if (/renoir|cezanne|raven|picasso|rembrandt|\bphoenix\d?\b|mendocino|\braphael\d?\b|strix|integrated|vega\s*[0-9]|radeon\s*\d+m\b|\bgraphics(?:\s|$|\])/i.test(d)) return true;
+    return false; // unbekannt -> diskret (bisheriges Verhalten beibehalten)
+  }
+  if (vendor === 'Apple') return false;
+  return false;
+}
+
 function parseNumber(s) {
   if (s == null) return null;
   const n = parseFloat(String(s).replace(',', '.').replace(/[^\d.]/g, ''));
@@ -120,7 +144,7 @@ async function detectLinux() {
           vendor: vendor || 'Unbekannt',
           name: desc,
           pciId: `${vendorId}:${deviceId}`,
-          usableBy: vendor === 'Intel' ? 'openvino' : (vendor === 'AMD' ? 'experimental' : 'info'),
+          usableBy: vendor === 'Intel' ? 'openvino' : (vendor === 'AMD' ? 'ryzenai' : 'info'),
         });
         continue;
       }
@@ -151,7 +175,7 @@ async function detectLinux() {
         vramBytes,
         driver: null,
         source: 'lspci',
-        discrete: !['Intel'].includes(vendor),
+        discrete: !isIntegrated(vendor, desc),
         backends: vendor === 'AMD'
           ? ['rocm', 'vulkan']
           : vendor === 'Intel'
@@ -256,7 +280,7 @@ async function detectWindows() {
         vramApprox: true,
         driver: g.DriverVersion || null,
         source: 'wmi',
-        discrete: vendor !== 'Intel',
+        discrete: !isIntegrated(vendor, name),
         backends: vendor === 'NVIDIA' ? ['cuda', 'vulkan'] : vendor === 'AMD' ? ['rocm', 'vulkan'] : vendor === 'Intel' ? ['vulkan', 'sycl', 'openvino'] : ['vulkan'],
       });
     }
@@ -288,7 +312,7 @@ async function detectWindows() {
         name,
         status: d.Status || null,
         pciId: null,
-        usableBy: vendor === 'Intel' ? 'openvino' : 'experimental',
+        usableBy: vendor === 'Intel' ? 'openvino' : (vendor === 'AMD' ? 'ryzenai' : 'experimental'),
       });
     }
   }
@@ -490,10 +514,21 @@ async function scanHardware() {
   hw.recommendation = recommendBackend(hw);
 
   // Realistisches Modell-Budget in GB
-  const bestGpu = [...hw.gpus].filter((g) => g.vramBytes).sort((a, b) => b.vramBytes - a.vramBytes)[0];
-  if (bestGpu) {
-    hw.modelBudgetGB = Math.round((bestGpu.vramBytes / 1073741824) * 10) / 10;
-    hw.modelBudgetSource = `VRAM: ${bestGpu.name}`;
+  // Nur eine DISKRETE GPU mit VRAM zaehlt fuer das Budget. Eine integrierte GPU
+  // (APU) hat nur geteiltes System-RAM als nutzbaren Speicher — ihr kleiner VRAM
+  // wuerde das Budget sonst falsch (zu klein oder Mismatch) berechnen.
+  const discreteGpu = [...hw.gpus].filter((g) => g.discrete && g.vramBytes).sort((a, b) => b.vramBytes - a.vramBytes)[0];
+  const anyGpu = [...hw.gpus].filter((g) => g.vramBytes).sort((a, b) => b.vramBytes - a.vramBytes)[0];
+  if (discreteGpu) {
+    hw.modelBudgetGB = Math.round((discreteGpu.vramBytes / 1073741824) * 10) / 10;
+    hw.modelBudgetSource = `VRAM: ${discreteGpu.name}`;
+  } else if (hw.gpus.some((g) => !g.discrete)) {
+    // iGPU-only-System: VRAM ist geteilter Speicher -> RAM-Budget mit klarem Hinweis
+    hw.modelBudgetGB = Math.round((hw.totalMemBytes / 1073741824) * 0.55 * 10) / 10;
+    hw.modelBudgetSource = 'RAM (integrierte GPU, geteilter Speicher)';
+  } else if (anyGpu) {
+    hw.modelBudgetGB = Math.round((anyGpu.vramBytes / 1073741824) * 10) / 10;
+    hw.modelBudgetSource = `VRAM: ${anyGpu.name}`;
   } else {
     hw.modelBudgetGB = Math.round((hw.totalMemBytes / 1073741824) * 0.55 * 10) / 10;
     hw.modelBudgetSource = 'RAM (kein VRAM erkannt)';
@@ -501,4 +536,4 @@ async function scanHardware() {
   return hw;
 }
 
-module.exports = { scanHardware, recommendBackend, formatBytes, run };
+module.exports = { scanHardware, recommendBackend, isIntegrated, formatBytes, run };

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { recommendBackend, formatBytes } = require('../electron/hardware');
+const { recommendBackend, isIntegrated, formatBytes } = require('../electron/hardware');
 const models = require('../electron/models');
 const { samplingArgs, getPreset, PRESETS } = require('../electron/presets');
 const { buildArgs } = require('../electron/server');
@@ -61,6 +61,35 @@ test('formatBytes', () => {
   assert.equal(formatBytes(1073741824), '1.0 GB');
   assert.equal(formatBytes(1536), '1.5 KB');
   assert.equal(formatBytes(null), null);
+});
+
+/* ---------------- integrated/discrete Klassifikation ---------------- */
+
+test('AMD-APU-iGPU (Radeon-Graphics/Codename) wird integriert erkannt', () => {
+  assert.equal(isIntegrated('AMD', 'Advanced Micro Devices, Inc. [AMD/ATI] Renoir [Radeon Vega 8/7 Graphics]'), true);
+  assert.equal(isIntegrated('AMD', 'AMD Radeon 780M Graphics'), true);
+  assert.equal(isIntegrated('AMD', 'Phoenix1 [Radeon 780M]'), true);
+  assert.equal(isIntegrated('AMD', 'Radeon(TM) Graphics'), true);
+});
+
+test('Diskrete AMD-GPU (RX/Navi/Vega-10) wird nicht als integriert erkannt', () => {
+  assert.equal(isIntegrated('AMD', 'Radeon RX 7900 XTX'), false);
+  assert.equal(isIntegrated('AMD', 'Navi 31 [Radeon RX 7900 XT]'), false);
+  assert.equal(isIntegrated('AMD', 'Vega 20 [Radeon Pro VII]'), false);
+});
+
+test('Intel Arc dGPU (diskrete Karte) wird nicht als integriert erkannt', () => {
+  assert.equal(isIntegrated('Intel', 'Intel(R) Arc(TM) A770 Graphics'), false);
+});
+
+test('Intel HD/Iris/UHD werden integriert erkannt', () => {
+  assert.equal(isIntegrated('Intel', 'Intel(R) UHD Graphics 730'), true);
+  assert.equal(isIntegrated('Intel', 'Intel Iris Xe Graphics'), true);
+  assert.equal(isIntegrated('Intel', 'Intel HD Graphics 630'), true);
+});
+
+test('NVIDIA wird nie als integriert erkannt', () => {
+  assert.equal(isIntegrated('NVIDIA', 'NVIDIA GeForce RTX 4070'), false);
 });
 
 /* ---------------- Quant-Auswahl & Fit ---------------- */
