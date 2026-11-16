@@ -9,7 +9,8 @@ Button -> Neuladen, Tabs (aria-selected, Pfeiltasten), natives confirmDialog, Co
 import sys, json
 from playwright.sync_api import sync_playwright
 
-URL = "file:///home/gregerr/workspace/modelharbor/ui/index.html"
+from pathlib import Path
+URL = Path(__file__).resolve().parent.parent.joinpath('ui', 'index.html').as_uri()
 
 API_MOCK = """
 window.__apiCalls = [];
