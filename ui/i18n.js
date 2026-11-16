@@ -103,6 +103,9 @@
     'models.split': { de: 'mehrteilig', en: 'multi-part' },
     'models.download': { de: 'Herunterladen', en: 'Download' },
     'models.onnxFolder': { de: 'ONNX-Ordner', en: 'ONNX folder' },
+    'models.onnxBadge': { de: 'NPU/ONNX', en: 'NPU/ONNX' },
+    'models.groupGguf': { de: 'GGUF-Modelle (Einzeldatei)', en: 'GGUF models (single file)' },
+    'models.groupOnnx': { de: 'ONNX-/Ryzen-AI-Modelle (Ordner-Download)', en: 'ONNX / Ryzen AI models (folder download)' },
     'models.onnxFiles': { de: '{count} Dateien', en: '{count} files' },
     'models.showFiles': { de: 'Dateien ansehen', en: 'Show files' },
     'models.openChat': { de: 'Chat öffnen', en: 'Open chat' },
@@ -181,7 +184,12 @@
     'setup.gpuLayersLabel': { de: 'GPU-Layers', en: 'GPU layers' },
     'setup.gpuLayersHint': {
       de: '999 = alles auf die GPU. Bei Speicherproblemen reduzieren.',
-      en: '999 = everything on the GPU. Lower this if you run out of memory.',
+      en: '999 = everything to the GPU. Reduce if memory is tight.',
+    },
+    'setup.debugLogLabel': { de: 'Erweitertes Log (Debug)', en: 'Extended log (debug)' },
+    'setup.debugLogHint': {
+      de: 'Erweiterte Debug-Meldungen (Hardware, Server, Downloads) nach <userData>/logs/modelharbor-debug.log.',
+      en: 'Extended debug messages (hardware, server, downloads) to <userData>/logs/modelharbor-debug.log.',
     },
 
     /* ----------------------------- Dialoge / Update ----------------------------- */
@@ -221,6 +229,7 @@
     'toast.modelsDirChanged': { de: 'Modellordner geändert', en: 'Model folder changed' },
     'toast.ctx': { de: 'Kontext: {value} Tokens', en: 'Context: {value} tokens' },
     'toast.gpuLayers': { de: 'GPU-Layers: {value}', en: 'GPU layers: {value}' },
+    'toast.debugLog': { de: 'Erweitertes Log: {value}', en: 'Extended log: {value}' },
     'toast.downloadDone': { de: 'Download abgeschlossen', en: 'Download complete' },
     'toast.downloadFailed': { de: 'Download fehlgeschlagen', en: 'Download failed' },
     'toast.downloadFinished': { de: 'Fertig: {file} ({size})', en: 'Done: {file} ({size})' },
@@ -461,6 +470,9 @@
     'modelBlurb.microsoft/Phi-3-mini-4k-instruct-onnx': { en: "Native OGA (GenAI). The starting point for ONNX/NPU." },
     'modelBlurb.microsoft/Phi-4-mini-instruct-onnx': { en: "Current Phi, OGA int4 for CPU/NPU." },
     'modelBlurb.onnx-community/Llama-3.2-1B-ONNX': { en: "Smallest OGA model — runs anywhere, including the NPU." },
+    'modelBlurb.amd/Qwen3.5_9B_rai_1.9.0_npu': { en: "AMD Ryzen AI build (RAI 1.9.0) for NPU/iGPU — genai_config.json in the repo root, ~15 GB folder download." },
+    'modelBlurb.amd/Qwen3-8B-awq-quant-onnx-hybrid': { en: "AMD ONNX build for Ryzen AI (hybrid of NPU and iGPU/CPU), ~8.8 GB folder download." },
+    'modelBlurb.amd/Phi-4-mini-instruct-onnx-ryzenai-hybrid': { en: "Compact Ryzen AI hybrid build of Phi-4 Mini — the smallest entry into NPU acceleration." },
     'backendNote.win-cuda-12.4': { en: "Fastest route for NVIDIA on Windows. Requires a current NVIDIA driver." },
     'backendNote.win-cuda-13.5': { en: "Newest CUDA version — only makes sense with a very recent driver." },
     'backendNote.win-vulkan': { en: "Works on all GPUs, small download. A little slower than CUDA/ROCm." },

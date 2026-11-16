@@ -9,6 +9,7 @@ const backends = require('./backends');
 const models = require('./models');
 const server = require('./server');
 const updater = require('./updater');
+const logger = require('./logger');
 const { PRESETS } = require('./presets');
 const i18n = require('../ui/i18n');
 
@@ -34,6 +35,7 @@ function defaultSettings() {
     lastModelId: null,
     onboardingDone: false,
     language: 'de',
+    debugLog: false,
   };
 }
 
@@ -48,6 +50,7 @@ function loadSettings() {
   } catch {
     settings = defaults;
   }
+  logger.configure({ debug: settings.debugLog, dir: userDataDir() });
   i18n.setLang(settings.language);
   for (const d of [settings.modelsDir, settings.backendsDir]) {
     try { fs.mkdirSync(d, { recursive: true }); } catch { /* ignore */ }
@@ -61,6 +64,7 @@ async function saveSettings(patch) {
   const file = path.join(userDataDir(), 'settings.json');
   await fsp.mkdir(path.dirname(file), { recursive: true });
   await fsp.writeFile(file, JSON.stringify(settings, null, 2), 'utf8');
+  logger.configure({ debug: settings.debugLog, dir: userDataDir() });
   return settings;
 }
 

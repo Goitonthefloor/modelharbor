@@ -80,6 +80,63 @@ function isIntegrated(vendor, desc) {
   return false;
 }
 
+/**
+ * Typischer VRAM bekannter GPUs, aus dem Gerätenamen geschätzt. Rückgabe in Bytes
+ * oder null (unbekannt). Laptop-/Mobil-Varianten haben andere Speichergrößen und
+ * werden bewusst NICHT geschätzt (null), integrierte Grafiken ebenfalls nicht.
+ */
+const VRAM_NAME_MAP = [
+  // NVIDIA — spezifischere Namen zuerst (4070 Ti vor 4070)
+  [/rtx\s*4090/i, 24], [/rtx\s*4080/i, 16], [/rtx\s*4070\s*ti/i, 12], [/rtx\s*4070/i, 12],
+  [/rtx\s*4060\s*ti/i, 8], [/rtx\s*4060/i, 8],
+  [/rtx\s*3090/i, 24], [/rtx\s*3080/i, 10], [/rtx\s*3060\s*ti/i, 8], [/rtx\s*3060/i, 12],
+  [/gtx\s*1660\s*ti/i, 6], [/gtx\s*1650/i, 4],
+  // AMD
+  [/rx\s*7900\s*xtx/i, 24], [/rx\s*7900\s*xt/i, 20], [/rx\s*7800\s*xt/i, 16],
+  [/rx\s*9070\s*xt/i, 16], [/rx\s*9070/i, 16], [/rx\s*7700\s*xt/i, 12], [/rx\s*7600/i, 8],
+  // Intel
+  [/arc\s*a770/i, 16], [/arc\s*a750/i, 8],
+];
+
+function estimateVramFromName(name) {
+  // (TM)/(R)/®/™ raus, sonst scheitern Muster wie "Arc(TM) A770"
+  const n = String(name || '').replace(/\((?:tm|r)\)|®|™/gi, ' ');
+  if (!n.trim()) return null;
+  // Laptop-/Mobil-Varianten: anderer Speicherausbau -> keine Schätzung
+  if (/laptop|mobile|max-?q|notebook/i.test(n)) return null;
+  // integrierte Grafik (kein eigener VRAM)
+  if (/radeon\s*graphics|vega\s*\d+\s*graphics|intel\s*(hd|uhd|iris)|apple\s*m\d/i.test(n)) return null;
+  for (const [re, gb] of VRAM_NAME_MAP) {
+    if (re.test(n)) return gb * 1024 * 1024 * 1024;
+  }
+  return null;
+}
+
+/**
+ * Sucht zu einem GPU-Namen den passenden Registry-VRAM-Wert
+ * (HardwareInformation.qwMemorySize ist ein QWORD und damit auch >4 GB korrekt).
+ * `entries` = [{ driverDesc, bytes }]. Reine Funktion, damit testbar.
+ */
+function pickRegistryVram(gpuName, entries) {
+  const name = String(gpuName || '').toLowerCase().trim();
+  if (!name || !Array.isArray(entries) || !entries.length) return null;
+  const match = (desc) => {
+    const d = String(desc || '').toLowerCase().trim();
+    if (!d) return false;
+    if (name.includes(d) || d.includes(name)) return true;
+    // Teiltreffer: erstes aussagekräftiges Namenswort (>=4 Zeichen) enthalten
+    const key = d.split(/[\s(),]+/).filter((w) => w.length >= 4).slice(0, 2).join(' ');
+    return key ? name.includes(key) : false;
+  };
+  let best = null;
+  for (const e of entries) {
+    if (!e || !Number.isFinite(e.bytes) || e.bytes <= 0) continue;
+    if (!match(e.driverDesc)) continue;
+    if (!best || e.bytes > best) best = e.bytes;
+  }
+  return best;
+}
+
 function parseNumber(s) {
   if (s == null) return null;
   const n = parseFloat(String(s).replace(',', '.').replace(/[^\d.]/g, ''));
@@ -242,6 +299,7 @@ async function detectWindows() {
       const parts = line.split(',').map((x) => x.trim());
       if (!parts[0]) continue;
       nvidiaNames.add(parts[0].toLowerCase());
+      require('./logger').debug(`hw(windows) nvidia-smi name=${parts[0]} vramMB=${parts[1] || 'n/a'} freeMB=${parts[2] || 'n/a'}`);
       gpus.push({
         vendor: 'NVIDIA',
         name: parts[0],
@@ -253,6 +311,29 @@ async function detectWindows() {
         discrete: true,
         backends: ['cuda', 'vulkan'],
       });
+    }
+  }
+
+  // Echter VRAM aus der Registry: HardwareInformation.qwMemorySize ist ein QWORD
+  // und damit auch jenseits von 4 GB korrekt (WMI-AdapterRAM ist UInt32 und kappt).
+  const vramReg = [];
+  const psVram = await powershell(
+    "$k='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}'; "
+    + "Get-ChildItem $k -ErrorAction SilentlyContinue | ForEach-Object { "
+    + "$p = Get-ItemProperty -Path $_.PSPath -ErrorAction SilentlyContinue; "
+    + "if ($p.DriverDesc) { [pscustomobject]@{ DriverDesc=$p.DriverDesc; Vram=$p.'HardwareInformation.qwMemorySize' } } "
+    + "} | ConvertTo-Json -Compress"
+  );
+  if (psVram.ok && psVram.out.trim()) {
+    let list = [];
+    try {
+      const parsed = JSON.parse(psVram.out.trim());
+      list = Array.isArray(parsed) ? parsed : [parsed];
+    } catch { /* unparsbar */ }
+    for (const r of list) {
+      const bytes = Number(r && r.Vram);
+      if (!r || !r.DriverDesc || !Number.isFinite(bytes) || bytes <= 0) continue;
+      vramReg.push({ driverDesc: String(r.DriverDesc), bytes });
     }
   }
 
@@ -270,17 +351,31 @@ async function detectWindows() {
       if ([...nvidiaNames].some((n) => name.toLowerCase().includes(n.split(' ')[0]))) continue;
       if (gpus.some((x) => x.name === name)) continue;
       const vendor = /nvidia/i.test(name) ? 'NVIDIA' : /amd|radeon/i.test(name) ? 'AMD' : /intel|arc|iris/i.test(name) ? 'Intel' : /qualcomm|adreno/i.test(name) ? 'Qualcomm' : 'Unbekannt';
-      // AdapterRAM ist bei >4 GB unzuverlässig (uint32) — nur als Hinweis nutzen
+      // AdapterRAM ist bei >4 GB unzuverlässig (UInt32): nur als Startwert,
+      // danach gewinnt der Registry-Wert (qwMemorySize, QWORD).
       let vramBytes = g.AdapterRAM ? Number(g.AdapterRAM) : null;
-      if (vramBytes && vramBytes < 0) vramBytes = null;
+      if (vramBytes && (vramBytes < 0 || vramBytes >= 4294967295)) vramBytes = null;
+      let vramSource = vramBytes ? 'wmi' : null;
+      const regBytes = pickRegistryVram(name, vramReg);
+      if (regBytes && (!vramBytes || regBytes > vramBytes)) {
+        vramBytes = regBytes;
+        vramSource = 'registry';
+      }
+      const discrete = !isIntegrated(vendor, name);
+      // Letzter Fallback: aus dem Gerätenamen schätzen (nur diskrete Karten).
+      if (discrete && (!vramBytes || vramBytes < 1073741824)) {
+        const est = estimateVramFromName(name);
+        if (est) { vramBytes = est; vramSource = 'estimate'; }
+      }
       gpus.push({
         vendor,
         name,
         vramBytes,
-        vramApprox: true,
+        vramApprox: vramSource !== 'registry',
+        vramSource,
         driver: g.DriverVersion || null,
         source: 'wmi',
-        discrete: !isIntegrated(vendor, name),
+        discrete,
         backends: vendor === 'NVIDIA' ? ['cuda', 'vulkan'] : vendor === 'AMD' ? ['rocm', 'vulkan'] : vendor === 'Intel' ? ['vulkan', 'sycl', 'openvino'] : ['vulkan'],
       });
     }
@@ -536,4 +631,4 @@ async function scanHardware() {
   return hw;
 }
 
-module.exports = { scanHardware, recommendBackend, isIntegrated, formatBytes, run };
+module.exports = { scanHardware, recommendBackend, isIntegrated, formatBytes, run, estimateVramFromName, pickRegistryVram };

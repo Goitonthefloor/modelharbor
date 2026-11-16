@@ -63,8 +63,8 @@ The ready-made packages live in `dist/`:
 
 | Platform | File | Status |
 |---|---|---|
-| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.4.1.exe` | build with `npm run dist:win` (Windows or Wine) |
-| Linux (x64) | `dist/ModelHarbor-1.4.1.AppImage` | built, tested in everyday use (121 MB) |
+| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.4.2.exe` | build with `npm run dist:win` (Windows or Wine) |
+| Linux (x64) | `dist/ModelHarbor-1.4.2.AppImage` | built, tested in everyday use (121 MB) |
 | macOS (Apple Silicon / Intel) | `ModelHarbor-1.2.2-arm64.dmg` / `-x64.dmg` | build with `npm run dist:mac` (on a Mac) |
 
 On first start the app walks you through the setup: check hardware, install a backend,

@@ -2,6 +2,52 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.4.2] - 2026-11-16
+
+### Added
+
+- **NPU-/Ryzen-AI-Modelle in den Vorschlägen.** Der Katalog enthält jetzt echte,
+  per HuggingFace-API verifizierte AMD-Ryzen-AI-Repos mit `genai_config.json` im
+  Repo-Root: `amd/Qwen3.5_9B_rai_1.9.0_npu` (RAI 1.9.0, ~15,4 GB), 
+  `amd/Qwen3-8B-awq-quant-onnx-hybrid` (~8,8 GB) und
+  `amd/Phi-4-mini-instruct-onnx-ryzenai-hybrid` (~5,1 GB). Sie sind mit
+  **„Ryzen AI“** gekennzeichnet und werden als kompletter Ordner geladen
+  (`onnxSub: null` = Repo-Root ohne README/LICENSE/Logs/`cache/`).
+- **Zweite Suchgruppe in der HuggingFace-Suche.** Neben der GGUF-Suche läuft eine
+  parallele ONNX-Suche (`filter=onnx`); Treffer mit ONNX-/NPU-Muster im Repo-Namen
+  (`onnx`, `ryzenai`, `rai`, `npu`, …) erscheinen als eigene Gruppe
+  „ONNX-/Ryzen-AI-Modelle (Ordner-Download)“ unter den GGUF-Treffern und haben
+  einen direkten Ordner-Download-Button.
+- **`estimateVramFromName()`** in `electron/hardware.js`: schätzt den typischen VRAM
+  bekannter GPUs (RTX 40/30, GTX 16, RX 7000/9000, Arc A750/A770) aus dem
+  Gerätenamen — Laptop-/Mobil-Varianten und integrierte Grafiken bewusst nicht.
+- **Optionale erweiterte Debug-Logdatei.** Neues `electron/logger.js`; Schalter
+  **„Erweitertes Log (Debug)“** in Setup → Einstellungen. Schreibt Hardware-,
+  Server- und Fehlerdetails nach `<userData>/logs/modelharbor-debug.log`
+  (150-KB-Rotation) — hilfreich beim Debuggen von Erkennung/Server/Downloads.
+
+### Fixed
+
+- **dGPU-VRAM wurde nur als 4 GB angezeigt.** Ursache war `Win32_VideoController.
+  AdapterRAM` (UInt32, kappt oberhalb von 4 GB). Die Windows-Erkennung liest jetzt
+  zusätzlich `HardwareInformation.qwMemorySize` (QWORD) aus der Registry
+  (`HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-…}\00*`) und ordnet
+  den Wert über die Treiberbeschreibung (`DriverDesc`) der passenden GPU zu. Fehlt
+  ein plausibler Wert (< 1 GB bei einer diskreten Karte), greift die
+  Namens-Schätzung (`vramApprox: true`). Integrierte GPUs bleiben unverändert.
+- **`listLocal` erkannte Ryzen-AI-Ordner nicht.** Voraussetzung war
+  `genai_config.json` **plus** `.onnx`/`.onnx.data`. Jetzt genügt eine echte große
+  Modelldatei (`.onnx`, `.onnx.data`, `.fconst` oder `.state` ab 50 MB) neben
+  `genai_config.json` — reine Config-Ordner bleiben weiterhin draußen.
+
+### Changed
+
+- Suchtreffer tragen jetzt `onnx`/`onnxSub`-Marker; ONNX-Katalogeinträge zeigen
+  keine Quant-/Dateiangabe mehr, sondern ihre Kennzeichnung („NPU/ONNX“ bzw.
+  „Ryzen AI“).
+- `npm test`: **61** Unit-Tests (vorher 53; +8: VRAM-Schätzung, Registry-Zuordnung,
+  `parseOnnxFolderFiles`, Ryzen-AI-`listLocal`); UI-Smoke **23/23**.
+
 ## [1.4.1] - 2026-11-16
 
 ### Added

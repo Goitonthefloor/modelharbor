@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { recommendBackend, isIntegrated, formatBytes } = require('../electron/hardware');
+const { recommendBackend, isIntegrated, formatBytes, estimateVramFromName, pickRegistryVram } = require('../electron/hardware');
 const models = require('../electron/models');
 const { samplingArgs, getPreset, PRESETS } = require('../electron/presets');
 const { buildArgs } = require('../electron/server');
@@ -316,12 +316,47 @@ test('listLocal erkennt einen ONNX-/GenAI-Modellordner', async () => {
   await fsp.mkdir(mdir, { recursive: true });
   await fsp.writeFile(path.join(mdir, 'genai_config.json'), '{}');
   await fsp.writeFile(path.join(mdir, 'model.onnx'), 'x');
-  await fsp.writeFile(path.join(mdir, 'model.onnx.data'), 'y');
+  // sparse Datei: 60 MB Modellgewichte (listLocal verlangt >= 50 MB)
+  await fsp.writeFile(path.join(mdir, 'model.onnx.data'), '');
+  await fsp.truncate(path.join(mdir, 'model.onnx.data'), 60 * 1024 * 1024);
   const list = await models.listLocal(root);
   assert.equal(list.length, 1);
   assert.equal(list[0].isOnnx, true);
   assert.ok(path.isAbsolute(list[0].path));
   assert.ok(list[0].file.startsWith('ONNX-'));
+  assert.ok(list[0].sizeBytes >= 60 * 1024 * 1024);
+  await fsp.rm(root, { recursive: true, force: true });
+});
+
+test('listLocal erkennt einen Ryzen-AI-Ordner ohne .onnx (fconst/state)', async () => {
+  const os = require('os');
+  const path = require('path');
+  const fsp = require('fs/promises');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'mh-rai-'));
+  const mdir = path.join(root, 'Qwen3.5_9B_rai_1.9.0_npu');
+  await fsp.mkdir(mdir, { recursive: true });
+  await fsp.writeFile(path.join(mdir, 'genai_config.json'), '{}');
+  await fsp.writeFile(path.join(mdir, 'rai_config.json'), '{}');
+  await fsp.writeFile(path.join(mdir, 'dd_metastate_Llm_Token_x.state'), '');
+  await fsp.truncate(path.join(mdir, 'dd_metastate_Llm_Token_x.state'), 80 * 1024 * 1024);
+  const list = await models.listLocal(root);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].isOnnx, true);
+  assert.equal(list[0].repo, 'Qwen3.5_9B_rai_1.9.0_npu');
+  await fsp.rm(root, { recursive: true, force: true });
+});
+
+test('listLocal ignoriert reine Config-Ordner (keine große Modelldatei)', async () => {
+  const os = require('os');
+  const path = require('path');
+  const fsp = require('fs/promises');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'mh-cfg-'));
+  const mdir = path.join(root, 'config-only');
+  await fsp.mkdir(mdir, { recursive: true });
+  await fsp.writeFile(path.join(mdir, 'genai_config.json'), '{}');
+  await fsp.writeFile(path.join(mdir, 'model.onnx'), 'x'); // zu klein
+  const list = await models.listLocal(root);
+  assert.equal(list.length, 0);
   await fsp.rm(root, { recursive: true, force: true });
 });
 
@@ -363,21 +398,99 @@ test('server.js reicht onnxPython durch und startet onnx_server.py', () => {
   assert.ok(src.includes('genai_config.json'), 'ONNX-Erkennung über genai_config.json');
 });
 
+/* -------------------- Erweitertes Debug-Logging -------------------- */
+
+const logger = require('../electron/logger');
+
+test('logger: bei debug=false passiert nichts (no-op)', () => {
+  const os = require('os');
+  const path = require('path');
+  logger.configure({ debug: false, dir: '/nonexistent' });
+  logger.debug('darf nicht auftauchen');
+  assert.equal(logger.debugEnabled, false);
+});
+
+test('logger: schreibt Debug-Zeilen nach <dir>/logs/modelharbor-debug.log', () => {
+  const os = require('os');
+  const path = require('path');
+  const fsp = require('fs/promises');
+  const fs = require('fs');
+  return (async () => {
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'mh-log-'));
+    logger.configure({ debug: true, dir });
+    logger.debug('probe debug line');
+    logger.error('probe error line');
+    logger.configure({ debug: false, dir });
+    const file = path.join(dir, 'logs', 'modelharbor-debug.log');
+    assert.ok(fs.existsSync(file), 'Debug-Logdatei wurde erzeugt');
+    const text = fs.readFileSync(file, 'utf8');
+    assert.ok(text.includes('probe debug line'), 'enthält debug-Meldung');
+    assert.ok(text.includes('probe error line'), 'enthält error-Meldung');
+    logger.configure({ debug: false, dir: null });
+    await fsp.rm(dir, { recursive: true, force: true });
+  })().catch((e) => { throw e; });
+});
+
 /* -------------------- ONNX-Katalog & Mehrfach-Download -------------------- */
 
-test('ONNX-Katalog-Einträge haben onnxSub auf einen Ordner mit genai_config.json', () => {
+test('ONNX-Katalog-Einträge haben onnxSub (Unterordner) oder null (Repo-Root)', () => {
   const onnxEntries = models.CATALOG.filter((c) => c.onnx);
-  assert.equal(onnxEntries.length, 3);
+  assert.equal(onnxEntries.length, 6);
   for (const e of onnxEntries) {
     assert.ok(e.repo.includes('/'), `${e.repo} ist ein HF-Repo`);
-    assert.ok(typeof e.onnxSub === 'string' && e.onnxSub.length > 0, `${e.repo} hat onnxSub`);
-    assert.ok(!e.onnxSub.endsWith('/'), `${e.repo}: onnxSub ohne Slash am Ende`);
+    // onnxSub: String = OGA-Unterordner, null = kompletter Repo-Root (Ryzen AI)
+    assert.ok(e.onnxSub === null || (typeof e.onnxSub === 'string' && e.onnxSub.length > 0),
+      `${e.repo} hat onnxSub (String) oder null`);
+    if (typeof e.onnxSub === 'string') {
+      assert.ok(!e.onnxSub.endsWith('/'), `${e.repo}: onnxSub ohne Slash am Ende`);
+    }
     assert.ok(e.name && e.params && e.blurb, `${e.repo} hat Titel/Params/blurb`);
+    assert.equal(e.preferQuant, null, `${e.repo} hat keinen Quant-Filter`);
   }
   const repos = onnxEntries.map((e) => e.repo);
   assert.ok(repos.includes('microsoft/Phi-3-mini-4k-instruct-onnx'));
   assert.ok(repos.includes('microsoft/Phi-4-mini-instruct-onnx'));
   assert.ok(repos.includes('onnx-community/Llama-3.2-1B-ONNX'));
+  // Ryzen-AI-/NPU-Repos mit genai_config.json im Root (per HF-API verifiziert)
+  assert.ok(repos.includes('amd/Qwen3.5_9B_rai_1.9.0_npu'));
+  assert.ok(repos.includes('amd/Qwen3-8B-awq-quant-onnx-hybrid'));
+  assert.ok(repos.includes('amd/Phi-4-mini-instruct-onnx-ryzenai-hybrid'));
+  const qwen35 = onnxEntries.find((e) => e.repo === 'amd/Qwen3.5_9B_rai_1.9.0_npu');
+  assert.equal(qwen35.onnxSub, null, 'Ryzen-AI-Repo lädt den ganzen Root');
+  assert.equal(qwen35.rai, true, 'Eintrag ist als Ryzen AI markiert');
+  assert.ok(qwen35.minGB >= 16, 'großer RAI-Build nennt seinen Platzbedarf');
+});
+
+test('parseOnnxFolderFiles: ganze Ordner-Downloads nur aus dem Root', () => {
+  const siblings = [
+    { rfilename: '.gitattributes', size: 100 },
+    { rfilename: 'gitattributes', size: 5 },
+    { rfilename: 'README.md', size: 200 },
+    { rfilename: 'LICENSE', size: 50 },
+    { rfilename: 'onnx_utils.log', size: 20 },
+    { rfilename: 'cache/txn_bins.zip', size: 2285153 },
+    { rfilename: 'partitioned/vision.onnx.data', size: 10129035 },
+    { rfilename: 'genai_config.json', size: 3000 },
+    { rfilename: 'chat_template.jinja', size: 900 },
+    { rfilename: 'dd_metastate_Llm_Token_x.fconst', size: 3749412864 },
+    { rfilename: 'dd_metastate_Llm_Token_x.state', size: 128 },
+    { rfilename: 'text.onnx', size: 1835008 },
+    { rfilename: 'text.onnx.data', size: 614891469 },
+  ];
+  const files = models.parseOnnxFolderFiles(siblings);
+  assert.deepEqual(files.map((f) => f.name), [
+    'chat_template.jinja', 'dd_metastate_Llm_Token_x.fconst', 'dd_metastate_Llm_Token_x.state',
+    'genai_config.json', 'text.onnx', 'text.onnx.data',
+  ]);
+  for (const f of files) {
+    assert.ok(!f.name.includes('/'), `${f.name} ist flach`);
+    assert.equal(f.repoPath, f.name, 'Repo-Root: repoPath == name');
+  }
+  // Doku/Logs/Unterordner bleiben draußen
+  const names = files.map((f) => f.name);
+  assert.ok(!names.includes('README.md') && !names.includes('.gitattributes'));
+  assert.ok(!names.includes('onnx_utils.log') && !names.some((n) => n.includes('cache')));
+  assert.equal(models.parseOnnxFolderFiles(null).length, 0);
 });
 
 const onnxSiblings = [
@@ -452,4 +565,52 @@ test('uvAssetFor: unbekannte Plattform/Architektur liefert null', () => {
   assert.equal(backends.uvAssetFor('freebsd', 'x64'), null);
   assert.equal(backends.uvAssetFor('linux', 'ia32'), null);
   assert.equal(backends.uvAssetFor(undefined, undefined), null);
+});
+
+/* -------------------- VRAM: Registry-QWORD + Namens-Schätzung -------------------- */
+
+const GB = 1024 * 1024 * 1024;
+
+test('estimateVramFromName: bekannte dGPUs liefern ihren typischen VRAM', () => {
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070'), 12 * GB);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060'), 8 * GB);
+  assert.equal(estimateVramFromName('AMD Radeon RX 7900 XTX'), 24 * GB);
+  assert.equal(estimateVramFromName('AMD Radeon RX 9070'), 16 * GB);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4090'), 24 * GB);
+  assert.equal(estimateVramFromName('Intel(R) Arc(TM) A770 Graphics'), 16 * GB);
+});
+
+test('estimateVramFromName: Ti-/XT-Varianten werden nicht verwechselt', () => {
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 Ti'), 12 * GB);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti'), 8 * GB);
+  assert.equal(estimateVramFromName('AMD Radeon RX 7900 XT'), 20 * GB);
+  assert.equal(estimateVramFromName('AMD Radeon RX 9070 XT'), 16 * GB);
+  assert.equal(estimateVramFromName('NVIDIA GeForce GTX 1660 Ti'), 6 * GB);
+});
+
+test('estimateVramFromName: integrierte Grafiken und Unbekanntes liefern null', () => {
+  assert.equal(estimateVramFromName('AMD Radeon(TM) Graphics'), null);
+  assert.equal(estimateVramFromName('Intel(R) HD Graphics'), null);
+  assert.equal(estimateVramFromName('Intel(R) Iris(R) Xe Graphics'), null);
+  assert.equal(estimateVramFromName('Irgendeine GPU 3000'), null);
+  assert.equal(estimateVramFromName(''), null);
+  assert.equal(estimateVramFromName(null), null);
+});
+
+test('estimateVramFromName: Laptop-/Mobil-Varianten werden nicht geschätzt', () => {
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 Laptop GPU'), null);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 3080 Mobile'), null);
+});
+
+test('pickRegistryVram: ordnet qwMemorySize über den Treibernamen zu', () => {
+  const entries = [
+    { driverDesc: 'NVIDIA GeForce RTX 4070', bytes: 12884901888 },
+    { driverDesc: 'Intel(R) UHD Graphics 770', bytes: 1073741824 },
+  ];
+  assert.equal(pickRegistryVram('NVIDIA GeForce RTX 4070', entries), 12884901888);
+  // WMI-Name und DriverDesc weichen leicht ab -> Teiltreffer greift
+  assert.equal(pickRegistryVram('NVIDIA GeForce RTX 4070 (Desktop)', entries), 12884901888);
+  assert.equal(pickRegistryVram('AMD Radeon RX 7900 XTX', entries), null);
+  assert.equal(pickRegistryVram('NVIDIA GeForce RTX 4070', []), null);
+  assert.equal(pickRegistryVram('', entries), null);
 });

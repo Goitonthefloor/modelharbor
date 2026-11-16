@@ -784,7 +784,9 @@ function modelCard(entry) {
   const dlId = isOnnx ? `${entry.repo}::onnx` : entry.downloadId;
   const dl = dlId ? state.downloads.get(dlId) : null;
   const quant = entry.file ? (entry.file.quant || '') : '';
-  const meta = isOnnx ? t('models.onnxFolder') : quant;
+  // ONNX-Einträge zeigen keine Quant/Datei, sondern ihre Kennzeichnung
+  // (NPU/ONNX bzw. Ryzen AI).
+  const meta = isOnnx ? (entry.tag || t('models.onnxBadge')) : quant;
   return `
     <article class="card" data-repo="${esc(entry.repo)}">
       <div class="card-top">
@@ -864,16 +866,30 @@ async function doSearch() {
 function renderSearchResults() {
   const list = $('#search-results');
   if (!state.searchResults.length) { list.innerHTML = `<div class="empty-note">${esc(t('models.noResults'))}</div>`; return; }
-  list.innerHTML = state.searchResults.map((r) => `
+  const row = (r) => {
+    const dlId = r.onnx ? `${r.repo}::onnx` : null;
+    const dl = dlId ? state.downloads.get(dlId) : null;
+    return `
     <div class="row">
       <div class="row-main">
-        <div class="row-title">${esc(r.repo)}</div>
+        <div class="row-title">${esc(r.repo)}${r.onnx ? ` <span class="badge badge-exp">${esc(t('models.onnxBadge'))}</span>` : ''}</div>
         <div class="row-sub">${esc(t('models.rowMeta', { downloads: i18n.num(r.downloads), likes: i18n.num(r.likes) }))}${r.lastModified ? ' · ' + new Date(r.lastModified).toLocaleDateString(i18n.locale()) : ''}</div>
+        ${dl ? `<div class="progress"><div class="progress-fill" style="width:${dl.percent || 0}%"></div></div>
+                <div class="progress-label"><span>${esc(dl.file || '')}</span><span>${dl.percent ? dl.percent.toFixed(0) + '%' : ''}</span></div>` : ''}
       </div>
       <div class="row-actions">
-        <button class="btn btn-ghost btn-sm" data-act="files" data-repo="${esc(r.repo)}">${esc(t('models.showFiles'))}</button>
+        ${r.onnx
+          ? `<button class="btn btn-primary btn-sm" data-act="download-search-onnx" data-repo="${esc(r.repo)}" ${dl ? 'disabled' : ''}>${esc(t('models.download'))}</button>`
+          : `<button class="btn btn-ghost btn-sm" data-act="files" data-repo="${esc(r.repo)}">${esc(t('models.showFiles'))}</button>`}
       </div>
-    </div>`).join('');
+    </div>`;
+  };
+  const gguf = state.searchResults.filter((r) => !r.onnx);
+  const onnx = state.searchResults.filter((r) => r.onnx);
+  list.innerHTML = [
+    gguf.length ? `<div class="section-title">${esc(t('models.groupGguf'))}</div>${gguf.map(row).join('')}` : '',
+    onnx.length ? `<div class="section-title">${esc(t('models.groupOnnx'))}</div>${onnx.map(row).join('')}` : '',
+  ].join('');
 }
 
 async function openFilePanel(repo) {
@@ -1082,6 +1098,10 @@ function renderSetup() {
         <div class="settings-label"><strong>${esc(t('setup.gpuLayersLabel'))}</strong><span>${esc(t('setup.gpuLayersHint'))}</span></div>
         <input type="number" class="num-input" id="set-ngl" min="0" max="999" step="1" value="${esc(state.settings?.gpuLayers ?? 999)}">
       </div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('setup.debugLogLabel'))}</strong><span>${esc(t('setup.debugLogHint'))}</span></div>
+        <input type="checkbox" id="set-debuglog" ${state.settings?.debugLog ? 'checked' : ''}>
+      </div>
     </section>`;
 }
 
@@ -1211,6 +1231,11 @@ function bindEvents() {
       }
       startDownload(repo, entry.file.name, btn);
     }
+    if (act === 'download-search-onnx') {
+      // ONNX-/Ryzen-AI-Treffer aus der Suche: kompletter Ordner (Repo-Root)
+      startDownload(btn.dataset.repo, null, btn, { isOnnx: true, onnxSub: null });
+      return;
+    }
     if (act === 'download-file') {
       if (!btn?.dataset?.file) {
         toast(t('toast.fileUnavailable', { repo: btn?.dataset?.repo || '' }), 'error', 8000);
@@ -1303,6 +1328,11 @@ function bindEvents() {
       const val = Math.max(0, parseInt(e.target.value, 10) || 0);
       state.settings = await bridge.settings.set({ gpuLayers: val });
       toast(t('toast.gpuLayers', { value: val }), 'ok', 1800);
+    }
+    if (e.target.id === 'set-debuglog') {
+      const val = !!e.target.checked;
+      state.settings = await bridge.settings.set({ debugLog: val });
+      toast(t('toast.debugLog', { value: val ? 'an' : 'aus' }), 'ok', 1800);
     }
     if (e.target.id === 'set-language' || e.target.id === 'onboard-language') {
       await setLanguage(e.target.value);

@@ -115,6 +115,8 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
   return { args, preset, sampling };
 }
 
+const logger = require('./logger');
+
 async function startServer(opts) {
   if (state.running || state.starting) {
     throw new Error(i18n.t('error.modelAlreadyRunning'));
@@ -156,6 +158,7 @@ async function startServer(opts) {
 
   logs = [];
   setState({ running: false, starting: true, pid: null, port, model: modelPath, preset: presetId, startedAt: null, error: null, argv: args });
+  logger.debug(`startServer mode=${isOnnx ? 'onnx' : 'llama'} executable=${path.basename(executable)} argv=${args.join(' ')}`);
   pushLog(`Starte: ${path.basename(executable)} ${args.join(' ')}`, 'info');
 
   proc = spawn(executable, args, {
@@ -173,6 +176,7 @@ async function startServer(opts) {
   proc.stdout.on('data', handleChunk('out'));
   proc.stderr.on('data', handleChunk('err'));
   proc.on('error', (err) => {
+    logger.error('server spawn/process error', err);
     pushLog(`Prozessfehler: ${err.message}`, 'err');
     setState({ starting: false, running: false, error: err.message });
     proc = null;
@@ -193,12 +197,14 @@ async function startServer(opts) {
       },
     });
   } catch (e) {
+    logger.error(`server health-check fehlgeschlagen nach ${port}`, e);
     await stopServer();
     setState({ error: e.message });
     throw e;
   }
 
   setState({ running: true, starting: false, startedAt: Date.now(), preset: presetId, sampling });
+  logger.info(`model ready on port ${port}`);
   pushLog('Modell geladen — Chat ist bereit.', 'info');
   return { port, pid: proc.pid, model: modelPath, preset: presetId };
 }

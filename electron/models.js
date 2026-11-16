@@ -116,6 +116,29 @@ const CATALOG = [
     blurb: 'Kleinstes OGA-Modell — läuft überall, auch auf der NPU.',
     preferQuant: null, minGB: 0,
   },
+  /* --- Ryzen AI / NPU: genai_config.json im Repo-ROOT, Download des ganzen Ordners ---
+   * `onnxSub: null` bedeutet: kein Unterordner — es werden alle Dateien im Root
+   * (ohne README/LICENSE/Logs/cache-Unterordner) flach geladen. Diese Builds
+   * (WGS/Ryzen-AI, Dateien wie dd_metastate_*.fconst/.state oder model_jit.onnx)
+   * laufen über die Ryzen-AI-Software, nicht über llama.cpp. */
+  {
+    repo: 'amd/Qwen3.5_9B_rai_1.9.0_npu', name: 'Qwen 3.5 9B (Ryzen AI)', params: '9B', family: 'Qwen',
+    tag: 'Ryzen AI', onnx: true, onnxSub: null, rai: true,
+    blurb: 'AMD-Ryzen-AI-Build (RAI 1.9.0) für NPU/iGPU — genai_config.json im Root, ~15 GB Ordner-Download.',
+    preferQuant: null, minGB: 21,
+  },
+  {
+    repo: 'amd/Qwen3-8B-awq-quant-onnx-hybrid', name: 'Qwen 3 8B (Ryzen AI)', params: '8B', family: 'Qwen',
+    tag: 'Ryzen AI', onnx: true, onnxSub: null, rai: true,
+    blurb: 'AMD-ONNX-Build für Ryzen AI (Hybrid aus NPU und iGPU/CPU), ~8,8 GB Ordner-Download.',
+    preferQuant: null, minGB: 9,
+  },
+  {
+    repo: 'amd/Phi-4-mini-instruct-onnx-ryzenai-hybrid', name: 'Phi-4 Mini (Ryzen AI)', params: '3.8B', family: 'Phi',
+    tag: 'Ryzen AI', onnx: true, onnxSub: null, rai: true,
+    blurb: 'Kompakter Ryzen-AI-Hybrid-Build von Phi-4 Mini — kleinster Einstieg in NPU-Beschleunigung.',
+    preferQuant: null, minGB: 6,
+  },
 ];
 
 /* --------------------------- HTTP --------------------------- */
@@ -378,28 +401,94 @@ function parseOnnxFiles(siblings, onnxSub) {
   return out;
 }
 
+/**
+ * Dateien, die beim Ordner-Download eines Ryzen-AI-/GenAI-Repos NICHT mitkommen:
+ * Git-Kram, Doku, Logs und alles in Unterordnern (cache/, partitioned/ ...).
+ */
+const ONNX_FOLDER_SKIP_RE = /^(?:\.?gitattributes|readme[^/]*|license[^/]*|.*\.log|.*\.md)$/i;
+
+/**
+ * Dateiliste für einen Repo-weiten Ordner-Download (`onnxSub === null`, z. B.
+ * amd-Ryzen-AI-Repos mit genai_config.json im Root). Nur Dateien DIREKT im Root,
+ * ohne Doku/Logs — Dateinamen bleiben die Basenames im Zielordner.
+ * Rein funktional (kein Netz), damit testbar.
+ */
+function parseOnnxFolderFiles(siblings) {
+  const out = [];
+  for (const s of Array.isArray(siblings) ? siblings : []) {
+    const rfilename = s && s.rfilename;
+    if (!rfilename) continue;
+    if (rfilename.includes('/')) continue; // Root only — cache/, partitioned/ usw. raus
+    if (ONNX_FOLDER_SKIP_RE.test(rfilename)) continue;
+    out.push({ name: path.basename(rfilename), repoPath: rfilename, size: bytesFromSizeEntry(s) });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
 /** Dateiliste + Gesamtgröße eines ONNX-Katalog-Eintrags (ein HF-API-Aufruf). */
 async function onnxModelFiles(repo, onnxSub) {
   const data = await getJson(`${HF}/api/models/${repo}?blobs=true`);
-  const files = parseOnnxFiles(data.siblings, onnxSub);
+  const flat = onnxSub == null || String(onnxSub).trim() === '';
+  const files = flat ? parseOnnxFolderFiles(data.siblings) : parseOnnxFiles(data.siblings, onnxSub);
   const size = files.reduce((s, f) => s + (f.size || 0), 0);
-  return { repo, onnxSub, files, size, downloads: data.downloads || 0, likes: data.likes || 0 };
+  return { repo, onnxSub: flat ? null : onnxSub, files, size, downloads: data.downloads || 0, likes: data.likes || 0 };
 }
 
 /* --------------------------- Suche --------------------------- */
 
+/**
+ * Repo-Namen, die nach ONNX/NPU-/Ryzen-AI-Build aussehen (amd/Qwen…_rai_…_npu,
+ * …-onnx-ryzenai-npu, …-onnx-hybrid …). Grundlage für die zweite Suchgruppe.
+ */
+const ONNX_REPO_RE = /(?:^|[-_.])(?:onnx|ryzenai|rai|npu|oga|genai)(?:[-_.]|$)/i;
+
+/** Zweite, fire-and-forget-Suche: ONNX-/NPU-Modelle (Ordner-Download, onnxSub unbekannt). */
+async function searchOnnxModels(query, limit = 10) {
+  const q = encodeURIComponent(query || '');
+  const url = `${HF}/api/models?search=${q}&filter=onnx&sort=downloads&direction=-1&limit=${limit * 3}`;
+  const list = await getJson(url);
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const m of list) {
+    if (!m || !m.id) continue;
+    if (!ONNX_REPO_RE.test(m.id)) continue; // nur Repos mit ONNX/NPU-Muster im Namen
+    out.push({
+      repo: m.id,
+      downloads: m.downloads || 0,
+      likes: m.likes || 0,
+      lastModified: m.lastModified || null,
+      onnx: true,
+      onnxSub: null, // unbekannt -> kompletter Ordner (Repo-Root) wird geladen
+      tags: (m.tags || []).filter((t) => /onnx|ryzenai|npu|hybrid|rai/i.test(t)).slice(0, 6),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Suche in zwei Gruppen: erst GGUF-Treffer (Einzeldatei-Download), darunter
+ * ONNX-/Ryzen-AI-Treffer (Ordner-Download). Fällt die ONNX-Suche aus (Netz,
+ * Rate-Limit), bleiben die GGUF-Treffer nutzbar.
+ */
 async function searchModels(query, limit = 25) {
   const q = encodeURIComponent(query || '');
   const url = `${HF}/api/models?search=${q}&filter=gguf&sort=downloads&direction=-1&limit=${limit}`;
+  const onnxPromise = searchOnnxModels(query, 10).catch(() => []);
   const list = await getJson(url);
-  if (!Array.isArray(list)) return [];
-  return list.map((m) => ({
+  const gguf = (Array.isArray(list) ? list : []).map((m) => ({
     repo: m.id,
     downloads: m.downloads || 0,
     likes: m.likes || 0,
     lastModified: m.lastModified || null,
+    onnx: false,
+    onnxSub: null,
     tags: (m.tags || []).filter((t) => /gguf|q\d|awq|gptq|mlx|it$|instruct/i.test(t)).slice(0, 6),
   }));
+  const seen = new Set(gguf.map((r) => r.repo));
+  const onnx = (await onnxPromise).filter((r) => !seen.has(r.repo));
+  return [...gguf, ...onnx];
 }
 
 async function catalogWithFit(hw) {
@@ -407,6 +496,7 @@ async function catalogWithFit(hw) {
   for (const entry of CATALOG) {
     if (entry.onnx) {
       // ONNX-/OGA-Eintrag: kein Quant, keine Einzeldatei — Ordner mit genai_config.json
+      // (onnxSub gesetzt = Unterordner, onnxSub null = kompletter Repo-Root).
       let info = null;
       try { info = await onnxModelFiles(entry.repo, entry.onnxSub); } catch { /* Eintrag bleibt sichtbar */ }
       const size = info ? info.size : 0;
@@ -414,6 +504,7 @@ async function catalogWithFit(hw) {
       out.push({
         ...entry,
         isOnnx: true,
+        rai: !!entry.rai,
         blurb: i18n.t(`modelBlurb.${entry.repo}`, null, entry.blurb),
         file: null,
         files: [],
@@ -503,16 +594,21 @@ async function downloadModel({ repo, file, modelsDir, onProgress = () => {}, dow
 }
 
 /**
- * Lädt ein ONNX-/OGA-Modell: alle Dateien aus `onnxSub` werden nacheinander
- * heruntergeladen und FLACH in <modelsDir>/<letzter-Repo-Teil> abgelegt —
- * genau die Form, die listLocal als ONNX-Modell erkennt.
+ * Lädt ein ONNX-/OGA-Modell und legt alle Dateien FLACH in
+ * <modelsDir>/<letzter-Repo-Teil> ab — genau die Form, die listLocal als
+ * ONNX-Modell erkennt.
+ *  - `onnxSub` gesetzt: nur die Dateien dieses Unterordners (OGA-Unterpfad).
+ *  - `onnxSub === null`: kompletter Repo-Root (Ryzen-AI-Builds, deren
+ *    genai_config.json direkt im Root liegt) ohne README/Logs/Unterordner.
  * Rückgabe: { bytes, total, files } (+ Zusatzinfos für die UI).
  */
 async function downloadOnnxModel({ repo, onnxSub, modelsDir, onProgress = () => {}, downloadId = null }) {
-  if (!onnxSub) throw new Error(i18n.t('error.onnxSubMissing', { repo }));
+  const flat = onnxSub == null || String(onnxSub).trim() === '';
   const data = await getJson(`${HF}/api/models/${repo}?blobs=true`);
-  const files = parseOnnxFiles(data.siblings, onnxSub);
-  if (!files.length) throw new Error(i18n.t('error.onnxFilesMissing', { repo, sub: onnxSub }));
+  const files = flat ? parseOnnxFolderFiles(data.siblings) : parseOnnxFiles(data.siblings, onnxSub);
+  if (!files.length) {
+    throw new Error(i18n.t('error.onnxFilesMissing', { repo, sub: flat ? 'root' : onnxSub }));
+  }
 
   const dirName = repo.split('/').pop();
   const folder = path.join(modelsDir, dirName);
@@ -549,7 +645,7 @@ async function downloadOnnxModel({ repo, onnxSub, modelsDir, onProgress = () => 
   return {
     repo,
     isOnnx: true,
-    onnxSub,
+    onnxSub: flat ? null : onnxSub,
     file: dirName,
     path: folder,
     dir: folder,
@@ -563,6 +659,13 @@ async function downloadOnnxModel({ repo, onnxSub, modelsDir, onProgress = () => 
 
 /* --------------------------- Lokale Modelle --------------------------- */
 
+/**
+ * Modelldateien, die einen GenAI-/Ryzen-AI-Ordner ausmachen. Ryzen-AI-Builds
+ * (WGS) haben oft KEIN .onnx, sondern dd_metastate_*.fconst/.state.
+ */
+const ONNX_MODEL_FILE_RE = /\.(onnx(\.data)?|fconst|state)$/i;
+const ONNX_MIN_MODEL_BYTES = 50 * 1024 * 1024; // config-only-Ordner aussortieren
+
 async function listLocal(modelsDir) {
   const out = [];
   let repos = [];
@@ -574,14 +677,23 @@ async function listLocal(modelsDir) {
     try { files = await fsp.readdir(dirPath); } catch { continue; }
     const ggufs = files.filter((f) => f.toLowerCase().endsWith('.gguf')).sort();
     if (!ggufs.length) {
-      // ONNX-/GenAI-Modellordner: genai_config.json + .onnx(date)
-      const hasOnnx = files.includes('genai_config.json') && files.some((f) => /\.onnx(\.data)?$/i.test(f));
-      if (!hasOnnx) continue;
+      // ONNX-/GenAI-Modellordner: genai_config.json im Root UND mindestens eine
+      // echte große Modelldatei (.onnx/.onnx.data/.fconst/.state ab 50 MB).
+      if (!files.includes('genai_config.json')) continue;
       let size = 0;
+      let biggest = 0;
+      let modelFiles = 0;
       for (const f of files) {
-        if (!/\.onnx(\.data)?$/i.test(f)) continue;
-        try { size += (await fsp.stat(path.join(dirPath, f))).size; } catch { /* ignore */ }
+        if (!ONNX_MODEL_FILE_RE.test(f)) continue;
+        try {
+          const st = await fsp.stat(path.join(dirPath, f));
+          if (!st.isFile()) continue;
+          size += st.size;
+          modelFiles += 1;
+          if (st.size > biggest) biggest = st.size;
+        } catch { /* ignore */ }
       }
+      if (!modelFiles || biggest < ONNX_MIN_MODEL_BYTES) continue;
       out.push({
         id: `${d.name}/onnx`,
         repo: d.name.replace(/__/g, '/'),
@@ -632,7 +744,7 @@ async function deleteModel(modelsDir, modelId) {
 
 module.exports = {
   CATALOG, QUANT_BITS, HF,
-  searchModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit,
-  downloadModel, downloadOnnxModel, parseOnnxFiles, onnxModelFiles,
+  searchModels, searchOnnxModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit,
+  downloadModel, downloadOnnxModel, parseOnnxFiles, parseOnnxFolderFiles, onnxModelFiles,
   listLocal, deleteModel, quantFromName, quantBits, getJson,
 };
