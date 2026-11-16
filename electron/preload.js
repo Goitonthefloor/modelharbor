@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('api', {
     catalog: () => ipcRenderer.invoke('models:catalog'),
     search: (q) => ipcRenderer.invoke('models:search', q),
     files: (repo) => ipcRenderer.invoke('models:files', repo),
-    download: (repo, file) => ipcRenderer.invoke('models:download', { repo, file }),
+    download: (repo, file, opts) => ipcRenderer.invoke('models:download', { repo, file, ...(opts || {}) }),
     local: () => ipcRenderer.invoke('models:local'),
     delete: (id) => ipcRenderer.invoke('models:delete', id),
     reveal: (p) => ipcRenderer.invoke('models:reveal', p),

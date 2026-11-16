@@ -362,3 +362,94 @@ test('server.js reicht onnxPython durch und startet onnx_server.py', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'electron', 'onnx_server.py')), 'onnx_server.py ist gebündelt');
   assert.ok(src.includes('genai_config.json'), 'ONNX-Erkennung über genai_config.json');
 });
+
+/* -------------------- ONNX-Katalog & Mehrfach-Download -------------------- */
+
+test('ONNX-Katalog-Einträge haben onnxSub auf einen Ordner mit genai_config.json', () => {
+  const onnxEntries = models.CATALOG.filter((c) => c.onnx);
+  assert.equal(onnxEntries.length, 3);
+  for (const e of onnxEntries) {
+    assert.ok(e.repo.includes('/'), `${e.repo} ist ein HF-Repo`);
+    assert.ok(typeof e.onnxSub === 'string' && e.onnxSub.length > 0, `${e.repo} hat onnxSub`);
+    assert.ok(!e.onnxSub.endsWith('/'), `${e.repo}: onnxSub ohne Slash am Ende`);
+    assert.ok(e.name && e.params && e.blurb, `${e.repo} hat Titel/Params/blurb`);
+  }
+  const repos = onnxEntries.map((e) => e.repo);
+  assert.ok(repos.includes('microsoft/Phi-3-mini-4k-instruct-onnx'));
+  assert.ok(repos.includes('microsoft/Phi-4-mini-instruct-onnx'));
+  assert.ok(repos.includes('onnx-community/Llama-3.2-1B-ONNX'));
+});
+
+const onnxSiblings = [
+  { rfilename: '.gitattributes', size: 100 },
+  { rfilename: 'README.md', size: 200 },
+  { rfilename: 'config.json', size: 876 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/genai_config.json', size: 1539 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/model.onnx', size: 107227 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/model.onnx.data', size: 1856839680 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer.json', size: 9085657 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer_config.json', size: 54528 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/special_tokens_map.json', size: 296 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/config.json', size: 876 },
+  { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/README.md', size: 300 },
+  { rfilename: 'cuda/cuda-fp16/genai_config.json', size: 1713 },
+  { rfilename: 'cuda/cuda-fp16/model.onnx', size: 83869 },
+  { rfilename: 'gpu/gpu-int4-rtn-block-32/model.onnx.data', size: 999 },
+];
+
+test('parseOnnxFiles: nur Dateien aus onnxSub, flach, ohne fremde Ordner', () => {
+  const sub = 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4';
+  const files = models.parseOnnxFiles(onnxSiblings, sub);
+  const names = files.map((f) => f.name).sort();
+  assert.deepEqual(names, [
+    'config.json', 'genai_config.json', 'model.onnx', 'model.onnx.data',
+    'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json',
+  ]);
+  for (const f of files) {
+    assert.ok(!f.name.includes('/'), `${f.name} ist flach`);
+    assert.equal(f.repoPath, `${sub}/${f.name}`, 'repoPath bleibt vollständig');
+  }
+  const data = files.find((f) => f.name === 'model.onnx.data');
+  assert.equal(data.size, 1856839680, 'Größe kommt aus der HF-API');
+});
+
+test('parseOnnxFiles: fremder onnxSub liefert leere Liste, Ungültiges crasht nicht', () => {
+  assert.deepEqual(models.parseOnnxFiles(onnxSiblings, 'cuda/cuda-int4-rtn-block-32'), []);
+  assert.deepEqual(models.parseOnnxFiles(onnxSiblings, 'gibts/nicht'), []);
+  assert.deepEqual(models.parseOnnxFiles(null, 'x'), []);
+  assert.deepEqual(models.parseOnnxFiles(onnxSiblings, ''), [{ name: 'config.json', repoPath: 'config.json', size: 876 }]);
+  // anderer Unterordner bleibt getrennt (keine Vermischung von gpu/ und cpu_and_mobile/)
+  assert.deepEqual(models.parseOnnxFiles(onnxSiblings, 'gpu/gpu-int4-rtn-block-32'),
+    [{ name: 'model.onnx.data', repoPath: 'gpu/gpu-int4-rtn-block-32/model.onnx.data', size: 999 }]);
+});
+
+test('parseOnnxFiles: erkennt auch Phi-4-Mini mit vocab.json/merges.txt', () => {
+  const siblings = [
+    { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/genai_config.json', size: 1 },
+    { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/model.onnx', size: 2 },
+    { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/model.onnx.data', size: 3 },
+    { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/vocab.json', size: 4 },
+    { rfilename: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/merges.txt', size: 5 },
+    { rfilename: 'gpu/gpu-int4-rtn-block-32/genai_config.json', size: 6 },
+  ];
+  const files = models.parseOnnxFiles(siblings, 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4');
+  assert.deepEqual(files.map((f) => f.name).sort(),
+    ['genai_config.json', 'merges.txt', 'model.onnx', 'model.onnx.data', 'vocab.json']);
+});
+
+/* -------------------- uv / Python-3.12-Mitinstall -------------------- */
+
+test('uvAssetFor liefert die richtigen uv-Release-Assets', () => {
+  assert.equal(backends.uvAssetFor('linux', 'x64'), 'uv-x86_64-unknown-linux-gnu.tar.gz');
+  assert.equal(backends.uvAssetFor('linux', 'arm64'), 'uv-aarch64-unknown-linux-gnu.tar.gz');
+  assert.equal(backends.uvAssetFor('win32', 'x64'), 'uv-x86_64-pc-windows-msvc.zip');
+  assert.equal(backends.uvAssetFor('win32', 'arm64'), 'uv-aarch64-pc-windows-msvc.zip');
+  assert.equal(backends.uvAssetFor('darwin', 'arm64'), 'uv-aarch64-apple-darwin.tar.gz');
+  assert.equal(backends.uvAssetFor('darwin', 'x64'), 'uv-x86_64-apple-darwin.tar.gz');
+});
+
+test('uvAssetFor: unbekannte Plattform/Architektur liefert null', () => {
+  assert.equal(backends.uvAssetFor('freebsd', 'x64'), null);
+  assert.equal(backends.uvAssetFor('linux', 'ia32'), null);
+  assert.equal(backends.uvAssetFor(undefined, undefined), null);
+});

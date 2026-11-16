@@ -2,6 +2,31 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.4.1] - 2026-11-16
+
+### Added
+
+- **ONNX-Katalog-Vorschläge** im Model-Download-Tab: drei kuratierte, OGA-taugliche
+  Repos (Phi-3 Mini 4K, Phi-4 Mini, Llama 3.2 1B) mit `onnx:true` — sie werden wie
+  andere Vorschläge angezeigt und per **Mehrfach-Download** als vollständiger
+  Modellordner (`genai_config.json` + `.onnx`/`.onnx.data` + Tokenizer) geladen.
+- **Python-3.12-Mitinstallation** für das `onnx`-Backend: fehlt ein passendes
+  System-Python (3.10–3.12), lädt der Installer die `astral/uv`-Binary, installiert
+  eine isolierte Python-3.12-Instanz und baut damit das OGA-Venv (`uv pip install
+  onnxruntime-genai`). Kein manuelles Python-Setup mehr nötig.
+
+### Fixed
+
+- **HuggingFace-Redirects** in `getJson` (relative `location`-Pfade) — betraf
+  `onnx-community/Llama-3.2-1B-ONNX`, das auf `…-Instruct-GENAI-ONNX` umleitet.
+- `pickSystemPython` erkannte bei ausführbarem Test-Befehl (Exec->NULL) fälschlich
+  „kein Python" — jetzt über `spawnSync`.
+
+### Changed
+
+- `npm test`: **53** Unit-Tests (vorher 47; +6: ONNX-Katalog, `parseOnnxFiles`,
+  `uvAssetFor`); UI-Smoke weiterhin **23/23**.
+
 ## [1.4.0] - 2026-11-16
 
 ### Added

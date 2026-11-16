@@ -197,13 +197,18 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle('models:download', async (_e, { repo, file }) => {
+  ipcMain.handle('models:download', async (_e, opts = {}) => {
+    const { repo, file } = opts;
+    const isOnnx = !!opts.isOnnx;
+    const onnxSub = opts.onnxSub || (models.CATALOG.find((c) => c.repo === repo) || {}).onnxSub;
     if (activeDownload) throw new Error(i18n.t('error.downloadRunning'));
-    activeDownload = { repo, file, startedAt: Date.now() };
-    const downloadId = `${repo}::${file}`;
+    activeDownload = { repo, file, onnx: isOnnx, startedAt: Date.now() };
+    const downloadId = opts.downloadId || `${repo}::${isOnnx ? 'onnx' : file}`;
     const onProgress = throttle((p) => send('download:progress', p), 120);
     try {
-      const result = await models.downloadModel({ repo, file, modelsDir: settings.modelsDir, onProgress, downloadId });
+      const result = isOnnx
+        ? await models.downloadOnnxModel({ repo, onnxSub, modelsDir: settings.modelsDir, onProgress, downloadId })
+        : await models.downloadModel({ repo, file, modelsDir: settings.modelsDir, onProgress, downloadId });
       // Hardware-Fit für das neue lokale Modell
       const hw = await scanHardwareCached();
       result.fit = models.evaluateFit(result.sizeBytes, result.file, hw, settings.ctx || 8192);

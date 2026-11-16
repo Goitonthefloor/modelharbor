@@ -94,6 +94,28 @@ const CATALOG = [
     tag: 'Reasoning', blurb: 'Denkt in Schritten — stark bei Mathe und Logik, langsamer im Alltag.',
     preferQuant: 'Q5_K_M', minGB: 6,
   },
+  /* --- ONNX / NPU: OnnxRuntime-GenAI-Modelle (Ordner mit genai_config.json) ---
+   * `onnxSub` ist der Unterordner im Repo, in dem genai_config.json + *.onnx liegen
+   * (per HF-API verifiziert). Diese Einträge werden nicht als einzelne GGUF-Datei
+   * geladen, sondern als kompletter Ordner flach nach <modelsDir>/<repo-name>. */
+  {
+    repo: 'microsoft/Phi-3-mini-4k-instruct-onnx', name: 'Phi-3 Mini 4K', params: '3.8B', family: 'Phi',
+    tag: 'NPU/ONNX', onnx: true, onnxSub: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4',
+    blurb: 'OGA-nativ (GenAI). Der Start-Hebel für ONNX/NPU.',
+    preferQuant: null, minGB: 0,
+  },
+  {
+    repo: 'microsoft/Phi-4-mini-instruct-onnx', name: 'Phi-4 Mini', params: '3.8B', family: 'Phi',
+    tag: 'NPU/ONNX', onnx: true, onnxSub: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4',
+    blurb: 'Aktuelles Phi, OGA-int4 für CPU/NPU.',
+    preferQuant: null, minGB: 0,
+  },
+  {
+    repo: 'onnx-community/Llama-3.2-1B-ONNX', name: 'Llama 3.2 1B', params: '1B', family: 'Llama',
+    tag: 'NPU/ONNX', onnx: true, onnxSub: 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4',
+    blurb: 'Kleinstes OGA-Modell — läuft überall, auch auf der NPU.',
+    preferQuant: null, minGB: 0,
+  },
 ];
 
 /* --------------------------- HTTP --------------------------- */
@@ -103,7 +125,8 @@ function getJson(url, timeoutMs = 20000) {
     const req = https.get(url, { headers: { 'User-Agent': 'ModelHarbor/1.0', 'Accept': 'application/json' }, timeout: timeoutMs }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        getJson(res.headers.location, timeoutMs).then(resolve, reject);
+        // HF leitet teils relativ um (z. B. umbenannte Repos) — gegen die Basis-URL auflösen
+        getJson(new URL(res.headers.location, url).toString(), timeoutMs).then(resolve, reject);
         return;
       }
       let body = '';
@@ -328,6 +351,41 @@ function evaluateFit(sizeBytes, fileName, hw, ctx) {
   return { verdict, label, detail, needGB: Math.round(needGB * 10) / 10, gpuLayers, vramGB: vram || null, ramGB: ram };
 }
 
+/* --------------------------- ONNX / OGA --------------------------- */
+
+/** Dateien, die ein OnnxRuntime-GenAI-Modellordner braucht (flach, ohne Unterpfade). */
+const ONNX_FILE_RE = /(\.onnx(\.data)?|genai_config\.json|tokenizer\.json|tokenizer_config\.json|tokenizer\.model|added_tokens\.json|special_tokens_map\.json|config\.json|vocab\.json|merges\.txt)$/i;
+
+/**
+ * Filtert aus den HF-siblings die Dateien des OGA-Unterordners `onnxSub` und gibt
+ * sie FLACH zurück (Pfad-Prefix entfernt) — so entsteht ein Ordner, den
+ * listLocal als ONNX-Modell erkennt (genai_config.json im Root).
+ * Rein funktional (kein Netz), damit testbar.
+ */
+function parseOnnxFiles(siblings, onnxSub) {
+  const sub = String(onnxSub || '').replace(/^\/+|\/+$/g, '');
+  const prefix = sub ? `${sub}/` : '';
+  const out = [];
+  for (const s of Array.isArray(siblings) ? siblings : []) {
+    const rfilename = s && s.rfilename;
+    if (!rfilename || !rfilename.startsWith(prefix)) continue;
+    const rel = rfilename.slice(prefix.length);
+    if (!rel || rel.includes('/')) continue; // nur Dateien direkt in onnxSub
+    if (!ONNX_FILE_RE.test(rel)) continue;
+    out.push({ name: rel, repoPath: rfilename, size: bytesFromSizeEntry(s) });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+/** Dateiliste + Gesamtgröße eines ONNX-Katalog-Eintrags (ein HF-API-Aufruf). */
+async function onnxModelFiles(repo, onnxSub) {
+  const data = await getJson(`${HF}/api/models/${repo}?blobs=true`);
+  const files = parseOnnxFiles(data.siblings, onnxSub);
+  const size = files.reduce((s, f) => s + (f.size || 0), 0);
+  return { repo, onnxSub, files, size, downloads: data.downloads || 0, likes: data.likes || 0 };
+}
+
 /* --------------------------- Suche --------------------------- */
 
 async function searchModels(query, limit = 25) {
@@ -347,6 +405,25 @@ async function searchModels(query, limit = 25) {
 async function catalogWithFit(hw) {
   const out = [];
   for (const entry of CATALOG) {
+    if (entry.onnx) {
+      // ONNX-/OGA-Eintrag: kein Quant, keine Einzeldatei — Ordner mit genai_config.json
+      let info = null;
+      try { info = await onnxModelFiles(entry.repo, entry.onnxSub); } catch { /* Eintrag bleibt sichtbar */ }
+      const size = info ? info.size : 0;
+      const fit = size ? evaluateFit(size, 'model.onnx', hw, 8192) : null;
+      out.push({
+        ...entry,
+        isOnnx: true,
+        blurb: i18n.t(`modelBlurb.${entry.repo}`, null, entry.blurb),
+        file: null,
+        files: [],
+        onnxFileCount: info ? info.files.length : 0,
+        fit,
+        downloads: info ? info.downloads : null,
+        sizeLabel: size ? `${(size / 1073741824).toFixed(2)} GB` : null,
+      });
+      continue;
+    }
     let info = null;
     try { info = await modelFiles(entry.repo); } catch { /* Katalog-Eintrag bleibt sichtbar, aber ohne Dateien */ }
     const files = info ? info.files : [];
@@ -425,6 +502,65 @@ async function downloadModel({ repo, file, modelsDir, onProgress = () => {}, dow
   };
 }
 
+/**
+ * Lädt ein ONNX-/OGA-Modell: alle Dateien aus `onnxSub` werden nacheinander
+ * heruntergeladen und FLACH in <modelsDir>/<letzter-Repo-Teil> abgelegt —
+ * genau die Form, die listLocal als ONNX-Modell erkennt.
+ * Rückgabe: { bytes, total, files } (+ Zusatzinfos für die UI).
+ */
+async function downloadOnnxModel({ repo, onnxSub, modelsDir, onProgress = () => {}, downloadId = null }) {
+  if (!onnxSub) throw new Error(i18n.t('error.onnxSubMissing', { repo }));
+  const data = await getJson(`${HF}/api/models/${repo}?blobs=true`);
+  const files = parseOnnxFiles(data.siblings, onnxSub);
+  if (!files.length) throw new Error(i18n.t('error.onnxFilesMissing', { repo, sub: onnxSub }));
+
+  const dirName = repo.split('/').pop();
+  const folder = path.join(modelsDir, dirName);
+  await fsp.mkdir(folder, { recursive: true });
+
+  const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
+  let doneBytes = 0;
+  for (const f of files) {
+    const url = `${HF}/${repo}/resolve/main/${encodePath(f.repoPath)}?download=true`;
+    const dest = path.join(folder, f.name);
+    onProgress({
+      phase: 'download', downloadId, repo, file: f.name, files: files.length,
+      received: 0, fileTotal: f.size, doneBytes, totalBytes,
+      percent: totalBytes ? (doneBytes / totalBytes) * 100 : null,
+    });
+    const res = await downloadFile(url, dest, (p) => {
+      onProgress({
+        phase: 'download', downloadId, repo, file: f.name, files: files.length,
+        received: p.received, fileTotal: p.total, doneBytes: doneBytes + p.received, totalBytes,
+        percent: totalBytes ? Math.min(100, ((doneBytes + p.received) / totalBytes) * 100) : p.percent,
+      });
+    });
+    const got = res.alreadyComplete ? (f.size || 0) : res.bytes;
+    if (f.size && got !== f.size) {
+      throw new Error(i18n.t('error.onnxDownloadIncomplete', {
+        file: f.name, got: (got / 1048576).toFixed(1), expected: (f.size / 1048576).toFixed(1),
+      }));
+    }
+    doneBytes += f.size || got || 0;
+  }
+
+  onProgress({ phase: 'done', downloadId, repo, file: dirName, files: files.length, percent: 100, doneBytes, totalBytes });
+
+  return {
+    repo,
+    isOnnx: true,
+    onnxSub,
+    file: dirName,
+    path: folder,
+    dir: folder,
+    bytes: doneBytes,
+    total: totalBytes,
+    files: files.length,
+    sizeBytes: totalBytes,
+    sizeLabel: `${(totalBytes / 1073741824).toFixed(2)} GB`,
+  };
+}
+
 /* --------------------------- Lokale Modelle --------------------------- */
 
 async function listLocal(modelsDir) {
@@ -497,5 +633,6 @@ async function deleteModel(modelsDir, modelId) {
 module.exports = {
   CATALOG, QUANT_BITS, HF,
   searchModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit,
-  downloadModel, listLocal, deleteModel, quantFromName, quantBits, getJson,
+  downloadModel, downloadOnnxModel, parseOnnxFiles, onnxModelFiles,
+  listLocal, deleteModel, quantFromName, quantBits, getJson,
 };

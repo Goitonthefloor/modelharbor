@@ -779,15 +779,18 @@ async function unloadModel(silent = false) {
 
 function modelCard(entry) {
   const fit = entry.fit || {};
+  const isOnnx = !!(entry.isOnnx || entry.onnx);
   const isLocal = state.local.some((l) => l.repo === entry.repo);
-  const dl = entry.downloadId ? state.downloads.get(entry.downloadId) : null;
+  const dlId = isOnnx ? `${entry.repo}::onnx` : entry.downloadId;
+  const dl = dlId ? state.downloads.get(dlId) : null;
   const quant = entry.file ? (entry.file.quant || '') : '';
+  const meta = isOnnx ? t('models.onnxFolder') : quant;
   return `
     <article class="card" data-repo="${esc(entry.repo)}">
       <div class="card-top">
         <div>
           <div class="card-title">${esc(entry.name)}</div>
-          <div class="card-meta">${esc(entry.params)} · ${esc(entry.family)}${quant ? ' · ' + esc(quant) : ''}</div>
+          <div class="card-meta">${esc(entry.params)} · ${esc(entry.family)}${meta ? ' · ' + esc(meta) : ''}</div>
         </div>
         ${fit.verdict ? fitBadge(fit) : `<span class="badge badge-neutral">${esc(t('common.unknown'))}</span>`}
       </div>
@@ -797,7 +800,7 @@ function modelCard(entry) {
         <span class="card-size">${entry.sizeLabel ? esc(entry.sizeLabel) : '–'}</span>
         ${isLocal
           ? `<button class="btn btn-primary btn-sm" data-act="load-catalog" data-repo="${esc(entry.repo)}">${esc(t('models.openChat'))}</button>`
-          : `<button class="btn btn-primary btn-sm" data-act="download-catalog" data-repo="${esc(entry.repo)}" ${dl ? 'disabled' : ''}>${esc(t('models.download'))}</button>`}
+          : `<button class="btn btn-primary btn-sm" data-act="download-catalog" data-repo="${esc(entry.repo)}"${isOnnx ? ' data-onnx="1"' : ''} ${dl ? 'disabled' : ''}>${esc(t('models.download'))}</button>`}
       </div>
       ${dl ? `<div class="progress"><div class="progress-fill" style="width:${dl.percent || 0}%"></div></div>
               <div class="progress-label"><span>${esc(dl.file || '')}</span><span>${dl.percent ? dl.percent.toFixed(0) + '%' : ''} ${dl.doneBytes ? fmtGB(dl.doneBytes) + ' / ' + fmtGB(dl.totalBytes) : ''}</span></div>` : ''}
@@ -1194,6 +1197,11 @@ function bindEvents() {
         if (btn) btn.disabled = true;
         return;
       }
+      if (entry.onnx || entry.isOnnx) {
+        // ONNX-/OGA-Eintrag: ganzer Ordner (genai_config.json + *.onnx) statt Einzeldatei
+        startDownload(repo, null, btn, { isOnnx: true, onnxSub: entry.onnxSub });
+        return;
+      }
       if (!entry.file) {
         // Kein Download, wenn keine nutzbare Datei (Bad Connection / nicht verfügbar):
         // dem User sichtbar melden statt still zu schweigen.
@@ -1378,20 +1386,30 @@ function bindEvents() {
   });
 }
 
-async function startDownload(repo, file, btn) {
-  const id = `${repo}::${file}`;
-  state.downloads.set(id, { downloadId: id, phase: 'download', percent: 0, file });
+async function startDownload(repo, file, btn, opts = {}) {
+  const isOnnx = !!opts.isOnnx;
+  const id = isOnnx ? `${repo}::onnx` : `${repo}::${file}`;
+  const label = isOnnx ? t('models.onnxFolder') : file;
+  state.downloads.set(id, { downloadId: id, phase: 'download', percent: 0, file: label });
   if (btn) {
     btn.disabled = true;
     const row = btn.closest('.row');
-    if (row) applyProgress(row.querySelector('.row-main') || row, { percent: 0, file });
+    if (row) applyProgress(row.querySelector('.row-main') || row, { percent: 0, file: label });
   }
   try {
-    const result = await bridge.models.download(repo, file);
+    const result = await bridge.models.download(repo, file, {
+      isOnnx,
+      onnxSub: opts.onnxSub,
+      downloadId: id,
+    });
     state.downloads.delete(id);
     await refreshLocal();
     await refreshCatalog();
-    toast(t('toast.downloadFinished', { file: result.file, size: result.sizeLabel }), 'ok', 5000);
+    if (isOnnx) {
+      toast(t('toast.onnxDownloadFinished', { file: result.file, size: result.sizeLabel, files: result.files }), 'ok', 6000);
+    } else {
+      toast(t('toast.downloadFinished', { file: result.file, size: result.sizeLabel }), 'ok', 5000);
+    }
     setTab('local');
   } catch (err) {
     state.downloads.delete(id);

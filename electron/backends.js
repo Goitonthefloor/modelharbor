@@ -501,27 +501,100 @@ async function removeBackend(installRoot, backendId) {
 
 /* --------------------------- ONNX-Backend (GenAI) --------------------------- */
 
+/** astral/uv-Assetname je Plattform — Python 3.12 kommt damit ohne System-Python. */
+const UV_ASSETS = {
+  linux: { x64: 'uv-x86_64-unknown-linux-gnu.tar.gz', arm64: 'uv-aarch64-unknown-linux-gnu.tar.gz' },
+  win32: { x64: 'uv-x86_64-pc-windows-msvc.zip', arm64: 'uv-aarch64-pc-windows-msvc.zip' },
+  darwin: { x64: 'uv-x86_64-apple-darwin.tar.gz', arm64: 'uv-aarch64-apple-darwin.tar.gz' },
+};
+
+/** Passender uv-Release-Assetname (rein funktional, testbar). */
+function uvAssetFor(platform, arch) {
+  const byArch = UV_ASSETS[platform];
+  if (!byArch) return null;
+  const key = arch === 'arm64' ? 'arm64' : (arch === 'x64' || arch === 'x86_64' ? 'x64' : null);
+  return key ? byArch[key] : null;
+}
+
+/** sucht die uv-Binary (uv / uv.exe) im entpackten uv-Archiv. */
+async function findUvBinary(dir) {
+  const names = process.platform === 'win32' ? ['uv.exe', 'uv'] : ['uv', 'uv.exe'];
+  const results = [];
+  async function walk(d, depth) {
+    if (depth > 4 || results.length) return;
+    let entries = [];
+    try { entries = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (results.length) return;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) await walk(p, depth + 1);
+      else if (names.includes(e.name)) results.push(p);
+    }
+  }
+  await walk(dir, 0);
+  return results[0] || null;
+}
+
+/**
+ * Stellt eine uv-Binary in <installRoot>/onnx-tools bereit (Download des
+ * neuesten astral/uv-Releases, einmalig) und gibt ihren Pfad zurück.
+ * uv bringt Python 3.12 selbst mit — Voraussetzung für OGA ohne System-Python.
+ */
+async function ensureUv(installRoot, onProgress = () => {}) {
+  const toolsDir = path.join(installRoot, 'onnx-tools');
+  const existing = await findUvBinary(toolsDir);
+  if (existing) return existing;
+
+  const assetName = uvAssetFor(process.platform, process.arch);
+  if (!assetName) throw new Error(i18n.t('error.platformMismatch', { label: 'uv', platform: process.platform, arch: process.arch }));
+
+  onProgress({ phase: 'download', backend: 'onnx', file: 'Python 3.12 (uv)', percent: 15 });
+  const release = await getJson('https://api.github.com/repos/astral-sh/uv/releases/latest');
+  const asset = Array.isArray(release && release.assets) ? release.assets.find((a) => a.name === assetName) : null;
+  if (!asset) throw new Error(i18n.t('error.uvAssetMissing', { asset: assetName }));
+
+  await fsp.mkdir(toolsDir, { recursive: true });
+  const archive = path.join(toolsDir, assetName);
+  await downloadToFile(asset.browser_download_url, archive, (p) => onProgress({
+    phase: 'download', backend: 'onnx', file: 'Python 3.12 (uv)',
+    received: p.received, fileTotal: p.total, percent: 15 + (p.percent || 0) * 0.3,
+  }));
+
+  if (/\.zip$/i.test(assetName)) await extractZipSafe(archive, toolsDir);
+  else await tar.x({ file: archive, cwd: toolsDir, preservePaths: false });
+
+  const uvPath = await findUvBinary(toolsDir);
+  if (!uvPath) throw new Error(i18n.t('error.uvBinaryMissing'));
+  if (process.platform !== 'win32') {
+    try { await fsp.chmod(uvPath, 0o755); } catch { /* ignore */ }
+  }
+  try { await fsp.rm(archive, { force: true }); } catch { /* ignore */ }
+  return uvPath;
+}
+
 /**
  * Baut das ONNX-Backend als Python-Venv mit onnxruntime-genai.
  * Kein llama.cpp-Asset-Download — das venv selbst ist das "Backend".
- * Python 3.10–3.12 wird benötigt (OGA-Wheels sind nur dafür stabil verfügbar).
+ * Bevorzugt ein System-Python 3.10–3.12; fehlt es, wird Python 3.12 über
+ * astral/uv heruntergeladen und installiert (keine System-Abhängigkeit mehr).
  */
 async function pickSystemPython() {
   const win = process.platform === 'win32';
   const candidates = win
     ? ['py -3.12', 'py -3.11', 'py -3.10', 'python3.12', 'python']
     : ['python3.12', 'python3.11', 'python3.10', 'python3'];
-  const { execFileSync } = require('child_process');
+  const { spawnSync } = require('child_process');
   for (const c of candidates) {
     const [exe, ...rest] = c.split(' ');
-    try {
-      const out = execFileSync(exe, [...rest, '--version'], { stdio: 'ignore' }).toString();
-      const m = out.match(/(\d+)\.(\d+)/);
-      const ver = m ? Number(`${m[1]}.${m[2]}`) : 0;
-      if (ver >= 3.10 && ver < 3.13) return c;
-    } catch { /* nächstes Kandidaten */ }
+    // py-Launcher liefert die Version auf stderr, python3 auf stdout — beides lesen.
+    const r = spawnSync(exe, [...rest, '--version'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+    if (r.status !== 0) continue;
+    const out = `${r.stdout || ''}${r.stderr || ''}`;
+    const m = out.match(/(\d+)\.(\d+)/);
+    const ver = m ? Number(`${m[1]}.${m[2]}`) : 0;
+    if (ver >= 3.10 && ver < 3.13) return c;
   }
-  throw new Error(i18n.t('error.onnxPythonMissing'));
+  return null; // kein System-Python — installOnnxBackend nutzt dann uv
 }
 
 async function installOnnxBackend(backendId, { installRoot, onProgress = () => {} }) {
@@ -535,12 +608,34 @@ async function installOnnxBackend(backendId, { installRoot, onProgress = () => {
 
   await fsp.mkdir(targetDir, { recursive: true });
   if (!fs.existsSync(venvPython)) {
-    onProgress({ phase: 'download', backend: 'onnx', file: 'Python-Venv anlegen', percent: 15 });
     const sysPy = await pickSystemPython();
-    execFileSync(sysPy.split(' ')[0], [...sysPy.split(' ').slice(1), '-m', 'venv', venvDir], { stdio: 'ignore', windowsHide: true });
+    if (sysPy) {
+      onProgress({ phase: 'download', backend: 'onnx', file: 'Python-Venv anlegen', percent: 15 });
+      const [exe, ...rest] = sysPy.split(' ');
+      execFileSync(exe, [...rest, '-m', 'venv', venvDir], { stdio: 'ignore', windowsHide: true });
+    } else {
+      // Kein System-Python 3.10–3.12: uv holen und Python 3.12 mitinstallieren.
+      let uv = null;
+      try {
+        uv = await ensureUv(installRoot, onProgress);
+      } catch (e) {
+        throw new Error(`${i18n.t('error.onnxPythonMissing')} (${e.message})`);
+      }
+      onProgress({ phase: 'download', backend: 'onnx', file: 'Python 3.12 (uv)', percent: 30 });
+      execFileSync(uv, ['python', 'install', '3.12'], { stdio: 'ignore', windowsHide: true });
+      onProgress({ phase: 'download', backend: 'onnx', file: 'Python-Venv anlegen', percent: 40 });
+      execFileSync(uv, ['venv', '--python', '3.12', venvDir], { stdio: 'ignore', windowsHide: true });
+    }
   }
   onProgress({ phase: 'download', backend: 'onnx', file: 'onnxruntime-genai', percent: 55 });
-  execFileSync(venvPip, ['install', '-q', 'onnxruntime-genai'], { stdio: 'ignore', windowsHide: true });
+  if (fs.existsSync(venvPip)) {
+    // klassisches venv (System-Python) — pip ist vorhanden
+    execFileSync(venvPip, ['install', '-q', 'onnxruntime-genai'], { stdio: 'ignore', windowsHide: true });
+  } else {
+    // uv-venv hat kein pip — Installation über uv
+    const uv = await ensureUv(installRoot, onProgress);
+    execFileSync(uv, ['pip', 'install', '--python', venvPython, 'onnxruntime-genai'], { stdio: 'ignore', windowsHide: true });
+  }
   onProgress({ phase: 'extract', backend: 'onnx', percent: 100 });
 
   const manifest = {
@@ -568,4 +663,6 @@ module.exports = {
   getJson,
   downloadToFile,
   extractZipSafe,
+  uvAssetFor,
+  ensureUv,
 };
