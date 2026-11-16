@@ -302,3 +302,63 @@ test('main.js deklariert activeUpdate für den update:download-Handler', () => {
   assert.match(src, /activeUpdate = \{ startedAt: Date\.now\(\) \};/, 'Handler setzt activeUpdate');
   assert.match(src, /activeUpdate = null;/, 'Handler räumt activeUpdate wieder auf');
 });
+
+/* -------------------- ONNX / NPU (GenAI) -------------------- */
+
+const backends = require('../electron/backends');
+
+test('listLocal erkennt einen ONNX-/GenAI-Modellordner', async () => {
+  const os = require('os');
+  const path = require('path');
+  const fsp = require('fs/promises');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'mh-onnx-'));
+  const mdir = path.join(root, 'phi3-mini');
+  await fsp.mkdir(mdir, { recursive: true });
+  await fsp.writeFile(path.join(mdir, 'genai_config.json'), '{}');
+  await fsp.writeFile(path.join(mdir, 'model.onnx'), 'x');
+  await fsp.writeFile(path.join(mdir, 'model.onnx.data'), 'y');
+  const list = await models.listLocal(root);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].isOnnx, true);
+  assert.ok(path.isAbsolute(list[0].path));
+  assert.ok(list[0].file.startsWith('ONNX-'));
+  await fsp.rm(root, { recursive: true, force: true });
+});
+
+test('listLocal ignoriert leere bzw. Nicht-ONNX-Ordner', async () => {
+  const os = require('os');
+  const path = require('path');
+  const fsp = require('fs/promises');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'mh-onnx2-'));
+  await fsp.mkdir(path.join(root, 'empty'), { recursive: true });
+  await fsp.mkdir(path.join(root, 'notes'), { recursive: true });
+  await fsp.writeFile(path.join(root, 'notes', 'readme.txt'), 'hi');
+  const list = await models.listLocal(root);
+  assert.equal(list.length, 0);
+  await fsp.rm(root, { recursive: true, force: true });
+});
+
+test('listInstalled erkennt das ONNX-Backend über sein Manifest', async () => {
+  const os = require('os');
+  const path = require('path');
+  const fsp = require('fs/promises');
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'mh-be-'));
+  const onnxDir = path.join(root, 'onnx');
+  await fsp.mkdir(onnxDir, { recursive: true });
+  await fsp.writeFile(path.join(onnxDir, 'modelharbor-backend.json'),
+    JSON.stringify({ id: 'onnx', serverPath: '/bin/true', label: 'ONNX Runtime (NPU)', onnx: true, npu: true }));
+  const installed = await backends.listInstalled(root);
+  assert.equal(installed.length, 1);
+  assert.equal(installed[0].id, 'onnx');
+  assert.equal(installed[0].onnx, true);
+  await fsp.rm(root, { recursive: true, force: true });
+});
+
+test('server.js reicht onnxPython durch und startet onnx_server.py', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'electron', 'server.js'), 'utf8');
+  assert.ok(src.includes('onnxPython'), 'startServer akzeptiert onnxPython');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'electron', 'onnx_server.py')), 'onnx_server.py ist gebündelt');
+  assert.ok(src.includes('genai_config.json'), 'ONNX-Erkennung über genai_config.json');
+});

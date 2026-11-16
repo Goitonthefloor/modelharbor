@@ -2,6 +2,31 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.4.0] - 2026-11-16
+
+### Added
+
+- **ONNX-/NPU-Modelle (OnnxRuntime GenAI).** ModelHarbor unterstützt jetzt zusätzlich
+  zu llama.cpp/GGUF auch ONNX-Modelle: lokale ONNX-Modellordner (`genai_config.json`
+  + `.onnx`) erscheinen im Modell-Fenster und werden über einen eigenen OGA-Chat-Server
+  gestartet — die Chat-Oberfläche bleibt identisch (OpenAI-kompatibel, SSE-Streaming).
+- **`onnx`-Backend** in der Einrichtung: legt ein Python-Venv (3.10–3.12) mit
+  `onnxruntime-genai` an und startet darüber den OGA-Server. Basis für AMD-Ryzen-AI-NPU,
+  Intel-OpenVINO-NPU, DirectML und CPU — ohne NPU läuft alles als CPU-Fallback.
+
+### Fixed
+
+- **Gemischte Responses** bei `hf`-CLI-Downloads sind hier nicht betroffen; stattdessen:
+  **`node --test test/` scheiterte** in der gebündelten Node-Version — das Test-Skript nutzt
+  jetzt explizite Globs (`"test/*.test.js"`). *(Hinweis aus 1.3.0, hier fixiert.)*
+
+### Changed
+
+- `npm test`: **47** Unit-Tests (vorher 43), davon 4 neue ONNX-/NPU-Tests
+  (`listLocal`, `listInstalled`, `server.js`-Verbindung); UI-Smoke weiterhin **23/23**.
+- `electron/onnx_server.py`: erweiterte OpenAI-kompatible Ausgabe (`/health`,
+  `chat/completions` mit `stream:true` SSE + Usage + `[DONE]`, `stream:false` JSON).
+
 ## [1.3.0] - 2026-11-16
 
 ### Fixed

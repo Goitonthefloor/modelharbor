@@ -153,6 +153,13 @@ const BACKENDS = {
     assets: [{ match: /^llama-.*-bin-macos-x64\.tar\.gz$/i, required: true }],
     note: 'Für Intel-Macs. Metal-Unterstützung ist dort eingeschränkt.',
   },
+  'onnx': {
+    label: 'ONNX Runtime (NPU)',
+    platform: 'any', arch: 'any',
+    onnx: true,
+    experimental: true, npu: true,
+    note: 'ONNXRuntime GenAI für ONNX-/NPU-Modelle (AMD Ryzen AI, Intel OpenVINO, DirectML, CPU). Braucht Python 3.10–3.12 im System.',
+  },
 };
 
 /* --------------------------- HTTP-Helfer --------------------------- */
@@ -277,16 +284,18 @@ function availableBackends(hw, release) {
   const rec = hw && hw.recommendation ? hw.recommendation : { primary: null, candidates: [] };
   const prio = new Map(rec.candidates.map((c, i) => [c.id, { rank: i, reason: c.reason, experimental: c.experimental }]));
   return Object.entries(BACKENDS)
-    .filter(([, d]) => d.platform === platform && d.arch === arch)
+    .filter(([, d]) => d.onnx || (d.platform === platform && d.arch === arch))
     .map(([id, d]) => {
       let assets = [];
       let size = 0;
       let missing = null;
-      try {
-        assets = resolveAssets(release, id);
-        size = assets.reduce((s, a) => s + (a.size || 0), 0);
-      } catch (e) {
-        missing = e.message;
+      if (!d.onnx) {
+        try {
+          assets = resolveAssets(release, id);
+          size = assets.reduce((s, a) => s + (a.size || 0), 0);
+        } catch (e) {
+          missing = e.message;
+        }
       }
       const p = prio.get(id);
       return {
@@ -381,8 +390,11 @@ async function findServerBinary(dir) {
 async function installBackend(backendId, { installRoot, onProgress = () => {} }) {
   const def = BACKENDS[backendId];
   if (!def) throw new Error(i18n.t('error.backendUnknown', { id: backendId }));
-  if (def.platform !== process.platform || def.arch !== process.arch) {
+  if (def.platform !== 'any' && (def.platform !== process.platform || def.arch !== process.arch)) {
     throw new Error(i18n.t('error.platformMismatch', { label: def.label, platform: process.platform, arch: process.arch }));
+  }
+  if (def.onnx) {
+    return installOnnxBackend(backendId, { installRoot, onProgress });
   }
   const release = await latestRelease();
   const assets = resolveAssets(release, backendId);
@@ -485,6 +497,65 @@ async function removeBackend(installRoot, backendId) {
   const dir = path.join(installRoot, backendId);
   if (!dir.startsWith(installRoot)) throw new Error(i18n.t('error.invalidPath'));
   await fsp.rm(dir, { recursive: true, force: true });
+}
+
+/* --------------------------- ONNX-Backend (GenAI) --------------------------- */
+
+/**
+ * Baut das ONNX-Backend als Python-Venv mit onnxruntime-genai.
+ * Kein llama.cpp-Asset-Download — das venv selbst ist das "Backend".
+ * Python 3.10–3.12 wird benötigt (OGA-Wheels sind nur dafür stabil verfügbar).
+ */
+async function pickSystemPython() {
+  const win = process.platform === 'win32';
+  const candidates = win
+    ? ['py -3.12', 'py -3.11', 'py -3.10', 'python3.12', 'python']
+    : ['python3.12', 'python3.11', 'python3.10', 'python3'];
+  const { execFileSync } = require('child_process');
+  for (const c of candidates) {
+    const [exe, ...rest] = c.split(' ');
+    try {
+      const out = execFileSync(exe, [...rest, '--version'], { stdio: 'ignore' }).toString();
+      const m = out.match(/(\d+)\.(\d+)/);
+      const ver = m ? Number(`${m[1]}.${m[2]}`) : 0;
+      if (ver >= 3.10 && ver < 3.13) return c;
+    } catch { /* nächstes Kandidaten */ }
+  }
+  throw new Error(i18n.t('error.onnxPythonMissing'));
+}
+
+async function installOnnxBackend(backendId, { installRoot, onProgress = () => {} }) {
+  const { execFileSync } = require('child_process');
+  const isWin = process.platform === 'win32';
+  const targetDir = path.join(installRoot, 'onnx');
+  const venvDir = path.join(targetDir, 'venv');
+  const bin = isWin ? 'Scripts' : 'bin';
+  const venvPython = path.join(venvDir, bin, isWin ? 'python.exe' : 'python');
+  const venvPip = path.join(venvDir, bin, isWin ? 'pip.exe' : 'pip');
+
+  await fsp.mkdir(targetDir, { recursive: true });
+  if (!fs.existsSync(venvPython)) {
+    onProgress({ phase: 'download', backend: 'onnx', file: 'Python-Venv anlegen', percent: 15 });
+    const sysPy = await pickSystemPython();
+    execFileSync(sysPy.split(' ')[0], [...sysPy.split(' ').slice(1), '-m', 'venv', venvDir], { stdio: 'ignore', windowsHide: true });
+  }
+  onProgress({ phase: 'download', backend: 'onnx', file: 'onnxruntime-genai', percent: 55 });
+  execFileSync(venvPip, ['install', '-q', 'onnxruntime-genai'], { stdio: 'ignore', windowsHide: true });
+  onProgress({ phase: 'extract', backend: 'onnx', percent: 100 });
+
+  const manifest = {
+    id: 'onnx',
+    label: 'ONNX Runtime (NPU)',
+    installedAt: new Date().toISOString(),
+    dir: targetDir,
+    serverPath: venvPython,
+    onnx: true,
+    experimental: true,
+    npu: true,
+  };
+  await fsp.writeFile(path.join(targetDir, 'modelharbor-backend.json'), JSON.stringify(manifest, null, 2), 'utf8');
+  onProgress({ phase: 'done', backend: 'onnx', percent: 100, manifest });
+  return manifest;
 }
 
 module.exports = {

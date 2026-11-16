@@ -437,7 +437,29 @@ async function listLocal(modelsDir) {
     let files = [];
     try { files = await fsp.readdir(dirPath); } catch { continue; }
     const ggufs = files.filter((f) => f.toLowerCase().endsWith('.gguf')).sort();
-    if (!ggufs.length) continue;
+    if (!ggufs.length) {
+      // ONNX-/GenAI-Modellordner: genai_config.json + .onnx(date)
+      const hasOnnx = files.includes('genai_config.json') && files.some((f) => /\.onnx(\.data)?$/i.test(f));
+      if (!hasOnnx) continue;
+      let size = 0;
+      for (const f of files) {
+        if (!/\.onnx(\.data)?$/i.test(f)) continue;
+        try { size += (await fsp.stat(path.join(dirPath, f))).size; } catch { /* ignore */ }
+      }
+      out.push({
+        id: `${d.name}/onnx`,
+        repo: d.name.replace(/__/g, '/'),
+        file: `ONNX-${d.name}`,
+        isOnnx: true,
+        parts: [],
+        path: dirPath,
+        sizeBytes: size,
+        sizeLabel: `${(size / 1073741824).toFixed(2)} GB`,
+        quant: null,
+        dir: dirPath,
+      });
+      continue;
+    }
     // Splits gruppieren
     const groups = new Map();
     for (const f of ggufs) {

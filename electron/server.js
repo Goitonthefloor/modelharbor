@@ -126,19 +126,41 @@ async function startServer(opts) {
   const port = opts.port || await freePort(9931);
   const ctx = overrides.ctx || 8192;
   const gpuLayers = overrides.gpuLayers !== undefined ? overrides.gpuLayers : 999;
-  const { args, preset, sampling } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw });
+  const { args: _b, preset, sampling } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw });
+
+  // ONNX-Modellordner (GenAI): statt llama-server den OGA-Chat-Server starten.
+  // Erkennung: Modellpfad ist ein Verzeichnis mit genai_config.json.
+  const isOnnx = (() => {
+    try { return fs.statSync(modelPath).isDirectory() && fs.existsSync(path.join(modelPath, 'genai_config.json')); }
+    catch { return false; }
+  })();
+  let executable = serverPath;
+  let args = _b;
+  const env = { ...process.env, LD_LIBRARY_PATH: [path.dirname(serverPath), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') };
+  if (isOnnx) {
+    const py = opts.onnxPython;
+    if (!py || !fs.existsSync(py)) {
+      throw new Error(i18n.t('error.onnxBackendMissing'));
+    }
+    executable = py;
+    const maxTok = Math.max(256, Number(opts.overrides.maxTokens || ctx || 8192));
+    args = [
+      path.join(__dirname, 'onnx_server.py'),
+      '--model-dir', modelPath,
+      '--port', String(port),
+      '--ep', opts.overrides.ep || 'cpu',
+      '--max-tokens', String(maxTok),
+    ];
+    env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH || '';
+  }
 
   logs = [];
   setState({ running: false, starting: true, pid: null, port, model: modelPath, preset: presetId, startedAt: null, error: null, argv: args });
-  pushLog(`Starte: ${path.basename(serverPath)} ${args.join(' ')}`, 'info');
+  pushLog(`Starte: ${path.basename(executable)} ${args.join(' ')}`, 'info');
 
-  proc = spawn(serverPath, args, {
-    cwd: path.dirname(serverPath),
-    env: {
-      ...process.env,
-      // Wichtig für AMD/Intel-Backends unter Linux
-      LD_LIBRARY_PATH: [path.dirname(serverPath), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':'),
-    },
+  proc = spawn(executable, args, {
+    cwd: path.dirname(executable),
+    env,
     windowsHide: true,
   });
 

@@ -286,7 +286,9 @@
       de: 'Download unvollständig: {got} GB von {expected} GB — bitte erneut starten (wird fortgesetzt).',
       en: 'Download incomplete: {got} GB of {expected} GB — please start again (it will resume).',
     },
-    'error.noFreePort': { de: 'Kein freier Port gefunden', en: 'No free port found' },
+    'error.noFreePort': { de: 'Kein freier Port gefunden', en: 'No free port available' },
+    'error.onnxBackendMissing': { de: 'ONNX-Backend (Python-Venv) ist nicht installiert. Installiere es in der Einrichtung.', en: 'ONNX backend (Python venv) is not installed. Install it in Setup.' },
+    'error.onnxPythonMissing': { de: 'ONNX-Backend braucht Python 3.10–3.12 im System.', en: 'ONNX backend requires Python 3.10–3.12 on your system.' },
     'error.serverExited': { de: 'Serverprozess ist beendet', en: 'Server process has exited' },
     'error.modelLoadFailed': {
       de: 'Modell konnte nicht geladen werden (letzter Status: {status}).\n{tail}',

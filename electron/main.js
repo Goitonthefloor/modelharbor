@@ -242,6 +242,7 @@ function registerIpc() {
       serverPath: backend.serverPath,
       modelPath: opts.modelPath,
       presetId: opts.preset || settings.lastPreset || 'balanced',
+      onnxPython: backend && backend.id === 'onnx' ? backend.serverPath : undefined,
       overrides: { ...(opts.overrides || {}), ctx: opts.ctx || settings.ctx, gpuLayers: opts.gpuLayers !== undefined ? opts.gpuLayers : settings.gpuLayers },
       hw: hwCache,
     });
