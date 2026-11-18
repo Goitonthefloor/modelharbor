@@ -35,6 +35,11 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Fire-and-forget-IPC: Fehler als Toast statt unbehandelter Promise-Rejection
+function ipc(p) {
+  Promise.resolve(p).catch((e) => toast(e && e.message ? e.message : String(e), 'error', 7000));
+}
+
 function fmtGB(bytes) {
   if (!bytes) return '–';
   const gb = bytes / 1073741824;
@@ -1117,7 +1122,7 @@ function bindEvents() {
       loadModel(state.server.lastModel);
     }
   });
-  $('#btn-models-folder').addEventListener('click', () => bridge.shell.showModels());
+  $('#btn-models-folder').addEventListener('click', () => ipc(bridge.shell.showModels()));
   $('#btn-check-update').addEventListener('click', async () => {
     try {
       const info = await bridge.update.check();
@@ -1134,20 +1139,24 @@ function bindEvents() {
     if (val === 'open' && stateUpdate.assetPath) {
       bridge.update.openFile(stateUpdate.assetPath).catch((e) => toast(e.message, 'error'));
     } else if (val === 'releases') {
-      bridge.update.openReleases();
+      ipc(bridge.update.openReleases());
     }
   });
   $('#btn-rescan').addEventListener('click', async () => {
     toast(t('toast.rescanning'), 'info', 1800);
-    state.hw = await bridge.hw.scan(true);
-    state.backends = await bridge.backends.list();
-    renderSetup(); renderSidebar(); refreshCatalog();
+    try {
+      state.hw = await bridge.hw.scan(true);
+      state.backends = await bridge.backends.list();
+      renderSetup(); renderSidebar(); refreshCatalog();
+    } catch (err) { toast(err.message, 'error', 7000); }
   });
 
   $('#preset-select').addEventListener('change', async (e) => {
     const preset = e.target.value;
     state.server.preset = preset;
-    await bridge.settings.set({ lastPreset: preset });
+    try {
+      await bridge.settings.set({ lastPreset: preset });
+    } catch { /* Preset gilt trotzdem für diese Sitzung */ }
     if (state.settings) state.settings.lastPreset = preset;
     const p = state.presets.find((x) => x.id === preset);
     toast(t('toast.preset', { name: p ? presetName(p) : preset }), 'ok', 1800);
@@ -1202,7 +1211,7 @@ function bindEvents() {
   // Delegierte Klicks
   document.addEventListener('click', async (e) => {
     const a = e.target.closest('[data-ext]');
-    if (a) { e.preventDefault(); bridge.shell.openExternal(a.dataset.ext); return; }
+    if (a) { e.preventDefault(); ipc(bridge.shell.openExternal(a.dataset.ext)); return; }
 
     const btn = e.target.closest('[data-act]');
     if (!btn) return;
@@ -1251,7 +1260,7 @@ function bindEvents() {
       const m = state.local.find((l) => l.id === btn.dataset.id);
       if (m) loadModel(m);
     }
-    if (act === 'reveal') { bridge.models.reveal(btn.dataset.path); }
+    if (act === 'reveal') { ipc(bridge.models.reveal(btn.dataset.path)); }
     if (act === 'delete-local') {
       const m = state.local.find((l) => l.id === btn.dataset.id);
       if (!m) return;
@@ -1302,39 +1311,51 @@ function bindEvents() {
       } catch (err) { toast(err.message, 'error'); }
     }
     if (act === 'pick-models') {
-      const dir = await bridge.dialog.pickFolder();
-      if (!dir) return;
-      state.settings = await bridge.settings.set({ modelsDir: dir });
-      renderSetup();
-      toast(t('toast.modelsDirChanged'), 'ok');
+      try {
+        const dir = await bridge.dialog.pickFolder();
+        if (!dir) return;
+        state.settings = await bridge.settings.set({ modelsDir: dir });
+        renderSetup();
+        toast(t('toast.modelsDirChanged'), 'ok');
+      } catch (err) { toast(err.message, 'error', 7000); }
     }
-    if (act === 'open-models') { bridge.shell.showModels(); }
+    if (act === 'open-models') { ipc(bridge.shell.showModels()); }
     if (act === 'onboarding-done') {
-      state.settings = await bridge.settings.set({ onboardingDone: true });
-      renderSetup();
+      try {
+        state.settings = await bridge.settings.set({ onboardingDone: true });
+        renderSetup();
+      } catch (err) { toast(err.message, 'error', 7000); }
     }
   });
 
   // Settings-Inputs (delegiert, weil neu gerendert)
   document.addEventListener('change', async (e) => {
-    if (e.target.id === 'set-ctx') {
-      const val = Math.max(1024, parseInt(e.target.value, 10) || 8192);
-      state.settings = await bridge.settings.set({ ctx: val });
-      toast(t('toast.ctx', { value: val }), 'ok', 1800);
-      refreshCatalog();
-    }
-    if (e.target.id === 'set-ngl') {
-      const val = Math.max(0, parseInt(e.target.value, 10) || 0);
-      state.settings = await bridge.settings.set({ gpuLayers: val });
-      toast(t('toast.gpuLayers', { value: val }), 'ok', 1800);
-    }
-    if (e.target.id === 'set-debuglog') {
-      const val = !!e.target.checked;
-      state.settings = await bridge.settings.set({ debugLog: val });
-      toast(t('toast.debugLog', { value: val ? 'an' : 'aus' }), 'ok', 1800);
-    }
-    if (e.target.id === 'set-language' || e.target.id === 'onboard-language') {
-      await setLanguage(e.target.value);
+    try {
+      if (e.target.id === 'set-ctx') {
+        // Ober- UND Untergrenze durchsetzen: das max-Attribut allein hält keine
+        // manuell eingetippte Zahl ab — ein zu großer ctx sprengt den KV-Cache.
+        const val = Math.min(131072, Math.max(1024, parseInt(e.target.value, 10) || 8192));
+        e.target.value = String(val);
+        state.settings = await bridge.settings.set({ ctx: val });
+        toast(t('toast.ctx', { value: val }), 'ok', 1800);
+        refreshCatalog();
+      }
+      if (e.target.id === 'set-ngl') {
+        const val = Math.min(999, Math.max(0, parseInt(e.target.value, 10) || 0));
+        e.target.value = String(val);
+        state.settings = await bridge.settings.set({ gpuLayers: val });
+        toast(t('toast.gpuLayers', { value: val }), 'ok', 1800);
+      }
+      if (e.target.id === 'set-debuglog') {
+        const val = !!e.target.checked;
+        state.settings = await bridge.settings.set({ debugLog: val });
+        toast(t('toast.debugLog', { value: val ? 'an' : 'aus' }), 'ok', 1800);
+      }
+      if (e.target.id === 'set-language' || e.target.id === 'onboard-language') {
+        await setLanguage(e.target.value);
+      }
+    } catch (err) {
+      toast(t('common.error', { message: err.message }), 'error', 7000);
     }
   });
 
@@ -1344,19 +1365,17 @@ function bindEvents() {
     const prev = state.downloads.get(p.downloadId) || {};
     state.downloads.set(p.downloadId, { ...prev, ...p });
     if (p.phase === 'done') {
-      setTimeout(async () => {
-        state.downloads.delete(p.downloadId);
-        await refreshLocal(); refreshCatalog();
-        toast(t('toast.downloadDone'), 'ok');
-        setTab('local');
-      }, 500);
+      // Toast, Refresh und Tab-Wechsel macht bereits startDownload — hier nur
+      // den Fortschritts-Eintrag entfernen, sonst erscheint alles doppelt.
+      state.downloads.delete(p.downloadId);
     } else if (p.phase === 'error') {
       state.downloads.delete(p.downloadId);
       toast(p.message || t('toast.downloadFailed'), 'error', 8000);
       renderCatalog();
     } else {
-      // Gezielt nur die betroffene Karte/Zeile aktualisieren (kein Voll-Rerender)
-      const card = document.querySelector(`.card[data-repo="${(p.repo || '').replace(/["\\]/g, '')}"]`);
+      // Gezielt nur die betroffene Karte/Zeile aktualisieren (kein Voll-Rerender).
+      // Kein CSS-Selektor mit Repo-Namen: Sonderzeichen könnten ihn brechen.
+      const card = $$('.card').find((c) => c.dataset.repo === p.repo);
       if (card) applyProgress(card, p);
       if (state.filePanel && state.filePanel.repo === p.repo) {
         const row = $$('#file-list .row').find((r) => (r.querySelector('.row-title') || {}).textContent === p.file);

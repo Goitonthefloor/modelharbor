@@ -47,29 +47,43 @@ class SseStream:
     """SSE-serialisierter Generator ueber einen Thread-Pipe."""
     pass
 
+def search_options(body, prompt_len, default_max_tokens):
+    """OGA-Suchoptionen aus dem Request bauen (rein, ohne OGA testbar).
+
+    WICHTIG: `max_length` ist bei OGA die GESAMTlaenge (Prompt + neue Tokens),
+    nicht die Anzahl neuer Tokens. Mit max_length = max_tokens wuerde ein langer
+    Prompt die Antwort abschneiden oder ganz verhindern.
+    `do_sample` darf nur bei temperature > 0 gesetzt sein, sonst ist das
+    deterministische Preset (temp 0) nicht greedy.
+    """
+    max_new = int(body.get("max_tokens") or default_max_tokens)
+    temperature = body.get("temperature")
+    opts = {"max_length": int(prompt_len) + max(1, max_new)}  # type: dict
+    if temperature is not None:
+        opts["temperature"] = float(temperature)
+    if body.get("top_p") is not None:
+        opts["top_p"] = float(body["top_p"])
+    if body.get("top_k") is not None:
+        opts["top_k"] = int(body["top_k"])
+    opts["do_sample"] = temperature is not None and float(temperature) > 0
+    return opts
+
+
 def run_generation(body):
     """Fuehrt die OGA-Generation aus und liefert Zeichenfragmente + usage."""
     messages = body.get("messages") or []
     if not messages:
         raise ValueError("messages erforderlich")
-    max_tokens = int(body.get("max_tokens") or ARGS.max_tokens)
-    temperature = body.get("temperature")
-    top_p = body.get("top_p")
-    top_k = body.get("top_k")
 
     msgs_json = json.dumps(messages, ensure_ascii=False)
     prompt = TOK.apply_chat_template(msgs_json, add_generation_prompt=True)
+    input_tokens = TOK.encode(prompt)
 
     p = OG.GeneratorParams(MODEL)
-    opts = {"max_length": max_tokens}
-    if temperature is not None: opts["temperature"] = float(temperature)
-    if top_p is not None: opts["top_p"] = float(top_p)
-    if top_k is not None: opts["top_k"] = int(top_k)
-    opts.setdefault("do_sample", True)
-    p.set_search_options(**opts)
+    p.set_search_options(**search_options(body, len(input_tokens), ARGS.max_tokens))
 
     gen = OG.Generator(MODEL, p)
-    gen.append_tokens(TOK.encode(prompt))
+    gen.append_tokens(input_tokens)
     stream = TOK.create_stream()
     n_in = gen.token_count()
     fragments = []
@@ -148,7 +162,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
+        # HTTP/1.1 ohne Content-Length/chunked: nur das Verbindungs-EOF markiert
+        # das Stream-Ende. Mit keep-alive haengt der Client nach [DONE] endlos.
+        self.send_header("Connection", "close")
+        self.close_connection = True
         self.end_headers()
         try:
             for frag in fragments:

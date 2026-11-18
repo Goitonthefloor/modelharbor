@@ -2,6 +2,57 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.4.5] - 2026-11-18
+
+### Fixed
+
+- **ONNX-/NPU-Chat hing nach der Antwort endlos.** Der SSE-Handler sendete unter
+  HTTP/1.1 `Connection: keep-alive` ohne `Content-Length` und ohne chunked
+  Encoding — es gab kein Stream-Ende, der Client wartete nach `[DONE]` für immer.
+  Die Antwort setzt jetzt `Connection: close` und beendet die Verbindung.
+- **ONNX: Antworten wurden abgeschnitten oder blieben leer.** `max_length` ist bei
+  OnnxRuntime-GenAI die **Gesamtlänge** (Prompt + neue Tokens), gesetzt wurde aber
+  nur `max_tokens`. Bei langem Prompt blieb kein Platz für die Antwort. Die
+  Prompt-Länge wird jetzt eingerechnet (`search_options`, rein und getestet).
+- **ONNX: deterministisches Preset war nicht greedy.** `do_sample` wurde immer auf
+  `True` gesetzt, auch bei `temperature: 0`. Sampling ist jetzt nur bei
+  `temperature > 0` aktiv.
+- **Löschen eines Modells zerstörte andere Quants.** `deleteModel` entfernte immer
+  den ganzen Repo-Ordner, obwohl der Dialog nur eine Datei nannte — alle anderen
+  Quantisierungen desselben Repos waren weg. Jetzt werden nur die Dateien des
+  gewählten Modells (inkl. Split-Parts) gelöscht; der Ordner bleibt, außer er ist
+  danach leer. ONNX-Ordner werden weiterhin als Ganzes entfernt.
+- **Leere Modell-ID löschte den gesamten Modell-Ordner.** `deleteModel('')` lief
+  auf das Root-Verzeichnis hinaus. Leere IDs, `.` und `..` werden jetzt abgelehnt.
+- **mmproj-Dateien wurden als eigenständige Modelle gelistet.** `listLocal` filtert
+  Hilfsdateien (mmproj, imatrix, README) jetzt wie schon die Repo-Dateiliste.
+- **Intel-Arc-iGPU wurde als diskrete Karte behandelt.** „Intel Arc Graphics“ und
+  „Arc 140V/130V“ (Core Ultra) haben keinen eigenen VRAM; nur Arc mit Modellnummer
+  (A770, B580, Arc Pro …) gilt als diskret. Das Modell-Budget war sonst falsch.
+- **Doppelte Abschlussmeldung bei Downloads.** Sowohl `startDownload` als auch der
+  `download:progress`-Handler zeigten Toast, Refresh und Tab-Wechsel — alles
+  erschien zweimal. Der Event-Handler räumt jetzt nur den Fortschrittseintrag ab.
+- **Kontextgröße hatte keine wirksame Obergrenze.** Das `max`-Attribut allein hält
+  keine eingetippte Zahl ab; ein zu großer `ctx` sprengt den KV-Cache. `ctx` wird
+  jetzt auf 1024–131072 begrenzt, `gpuLayers` auf 0–999, und das Feld zeigt den
+  tatsächlich gespeicherten Wert.
+- **Unbehandelte Promise-Rejections im Renderer.** Mehrere IPC-Aufrufe ohne
+  `catch` (`reveal`, `showModels`, `openExternal`, `openReleases`, Rescan, Preset,
+  Ordnerwahl, Onboarding, Einstellungen) konnten als unbehandelte Rejection
+  enden — u. a. wenn der neue Pfad-Guard einen Pfad ablehnt. Fehler erscheinen
+  jetzt als Toast.
+- **Fortschritts-Update konnte den Renderer brechen.** Der Repo-Name wurde in
+  einen CSS-Selektor interpoliert; Sonderzeichen hätten ihn ungültig gemacht.
+  Die Karte wird jetzt über einen Datenvergleich gesucht.
+
+### Changed
+
+- `npm test`: **98** Unit-Tests (vorher 88; +10 für Modellverwaltung,
+  Intel-Arc-Klassifikation und den ONNX-Server). UI-Smoke **25/25** (+2 Checks:
+  ctx/ngl-Obergrenzen, einfache Abschlussmeldung).
+- Neuer Python-Test `scripts/test_onnx_server.py` (13 Checks, läuft ohne
+  Onnxruntime/Modell und wird von `npm test` mitausgeführt, sofern python3 da ist).
+
 ## [1.4.4] - 2026-11-18
 
 ### Fixed

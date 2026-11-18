@@ -66,8 +66,13 @@ function isIntegrated(vendor, desc) {
   const d = String(desc || '');
   if (vendor === 'NVIDIA') return false;
   if (vendor === 'Intel') {
-    // Arc sind echte dGPUs; alle HD/Iris/UHD sind im Normal-/Teilfall integriert.
-    if (/intel\s*arc|arc\s*(?:\(.*?\))?\s*(?:a?[0-9]\s*)?[0-9]/i.test(d)) return false;
+    // Arc mit Modellnummer (A770, B580, Arc Pro …) ist eine echte dGPU.
+    // "Arc Graphics" ohne Nummer und "Arc 140V/130V" sind die iGPUs in
+    // Core Ultra (geteilter Speicher) — kein eigener VRAM.
+    if (/\barc\b/i.test(d)) {
+      if (/\d{3}\s*v\b/i.test(d)) return true;
+      return !/\barc\s*(?:\(tm\)|\(r\))?\s*(?:pro\s*)?[ab]?\d{2,4}/i.test(d);
+    }
     return true;
   }
   if (vendor === 'AMD') {

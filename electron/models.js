@@ -8,6 +8,7 @@ const i18n = require('../ui/i18n');
 const path = require('path');
 const https = require('https');
 const { pipeline } = require('stream/promises');
+const { isWithin } = require('./paths');
 
 const HF = 'https://huggingface.co';
 
@@ -678,7 +679,8 @@ async function listLocal(modelsDir) {
     const dirPath = path.join(modelsDir, d.name);
     let files = [];
     try { files = await fsp.readdir(dirPath); } catch { continue; }
-    const ggufs = files.filter((f) => f.toLowerCase().endsWith('.gguf')).sort();
+    // mmproj/imatrix & Co. sind Hilfsdateien, keine eigenständigen Modelle
+    const ggufs = files.filter((f) => f.toLowerCase().endsWith('.gguf') && !isAuxiliary(f)).sort();
     if (!ggufs.length) {
       // ONNX-/GenAI-Modellordner: genai_config.json im Root UND mindestens eine
       // echte große Modelldatei (.onnx/.onnx.data/.fconst/.state ab 50 MB).
@@ -738,11 +740,35 @@ async function listLocal(modelsDir) {
   return out;
 }
 
+/**
+ * Löscht ein lokales Modell. Bei GGUF-Modellen werden NUR die Dateien dieses
+ * Modells (inkl. Split-Parts) entfernt — andere Quants im selben Repo-Ordner
+ * bleiben erhalten. Der Ordner wird nur aufgeräumt, wenn er danach leer ist.
+ * Ein ONNX-Modell ist ein Ordner als Ganzes und wird komplett entfernt.
+ */
 async function deleteModel(modelsDir, modelId) {
-  const [dirName] = modelId.split('/');
+  const id = String(modelId || '');
+  const idx = id.indexOf('/');
+  const dirName = idx < 0 ? id : id.slice(0, idx);
+  const key = idx < 0 ? '' : id.slice(idx + 1);
+  if (!dirName || dirName === '.' || dirName === '..') throw new Error(i18n.t('error.invalidPath'));
   const dirPath = path.join(modelsDir, dirName);
-  if (!path.resolve(dirPath).startsWith(path.resolve(modelsDir))) throw new Error(i18n.t('error.invalidPath'));
-  await fsp.rm(dirPath, { recursive: true, force: true });
+  if (!isWithin(modelsDir, dirPath)) throw new Error(i18n.t('error.invalidPath'));
+  if (!key || key === 'onnx') {
+    await fsp.rm(dirPath, { recursive: true, force: true });
+    return;
+  }
+  let files = [];
+  try { files = await fsp.readdir(dirPath); } catch { return; }
+  const targets = files.filter((f) => splitKey(f) === key);
+  if (!targets.length) return; // unbekanntes Modell: nichts löschen, Ordner behalten
+  for (const f of targets) {
+    await fsp.rm(path.join(dirPath, f), { force: true });
+  }
+  try {
+    const rest = await fsp.readdir(dirPath);
+    if (!rest.length) await fsp.rm(dirPath, { recursive: true, force: true });
+  } catch { /* ignore */ }
 }
 
 module.exports = {

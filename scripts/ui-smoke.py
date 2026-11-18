@@ -50,7 +50,7 @@ window.api = {
     openFile: async () => ({}),
     openReleases: async () => ({}),
   },
-  on: () => {},
+  on: (channel, cb) => { (window.__handlers = window.__handlers || {})[channel] = cb; return () => {}; },
 };
 """
 
@@ -299,6 +299,47 @@ with sync_playwright() as p:
           i18n_back["lang"] == "de" and i18n_back["nav"] == ["Chat", "Modelle", "Einrichtung"]
           and any(c["language"] == "de" for c in i18n_back["calls"]),
           json.dumps(i18n_back, ensure_ascii=False))
+
+    # Runde 3: ctx-Obergrenze wird erzwungen (max-Attribut allein reicht nicht)
+    page.evaluate("setView('setup')")
+    page.wait_for_timeout(250)
+    ctx_clamp = page.evaluate("""async () => {
+      const el = document.querySelector('#set-ctx');
+      el.value = '999999';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 250));
+      const ngl = document.querySelector('#set-ngl');
+      ngl.value = '5000';
+      ngl.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 250));
+      return { ctx: el.value, ngl: ngl.value,
+               calls: window.__settingsCalls.filter(c => c.ctx !== undefined || c.gpuLayers !== undefined).slice(-2) };
+    }""")
+    check("Setup: ctx/ngl werden auf ihre Obergrenze begrenzt",
+          ctx_clamp["ctx"] == "131072" and ctx_clamp["ngl"] == "999"
+          and any(c.get("ctx") == 131072 for c in ctx_clamp["calls"])
+          and any(c.get("gpuLayers") == 999 for c in ctx_clamp["calls"]),
+          json.dumps(ctx_clamp))
+
+    # Runde 3: Download-Abschluss darf nur EINE Meldung erzeugen
+    page.evaluate("setView('models')")
+    page.wait_for_timeout(200)
+    dl = page.evaluate("""async () => {
+      clearToasts();
+      await new Promise(r => setTimeout(r, 350));
+      const count = () => document.querySelectorAll('#toast-wrap .toast').length;
+      const before = count();
+      await startDownload('test/model', 'model.Q4_K_M.gguf', null);
+      await new Promise(r => setTimeout(r, 250));
+      const afterStart = count();
+      const h = (window.__handlers || {})['download:progress'];
+      if (h) h({ phase: 'done', downloadId: 'test/model::model.Q4_K_M.gguf', repo: 'test/model', percent: 100 });
+      await new Promise(r => setTimeout(r, 800));
+      return { before, afterStart, afterEvent: count(), hasHandler: !!h };
+    }""")
+    check("Download: Abschlussmeldung nur einmal (kein Doppel-Toast)",
+          dl["hasHandler"] and dl["afterStart"] == dl["before"] + 1 and dl["afterEvent"] == dl["afterStart"],
+          json.dumps(dl))
 
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))
