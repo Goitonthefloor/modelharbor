@@ -2,6 +2,39 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.4.3] - 2026-11-18
+
+### Fixed
+
+- **Download-Fortsetzung meldete falsche Byte-Zahlen.** Antwortet ein Server auf
+  einen Range-Request mit `200` (Range ignoriert) statt `206`, wird die Zieldatei
+  neu geschrieben. `downloadFile` (Modelle) und `downloadToFile` (Backends)
+  zählten trotzdem ab der alten Dateigröße weiter: gemeldete Bytes > Dateigröße,
+  Fortschritt über 100 % und danach die Meldung „Download unvollständig“, obwohl
+  die Datei vollständig auf der Platte lag. Bei `200` beginnt der Zähler jetzt bei 0.
+- **`removeBackend()` konnte Verzeichnisse außerhalb des Backend-Ordners löschen.**
+  Die Prüfung war ein reiner String-Präfixvergleich (`dir.startsWith(installRoot)`)
+  ohne `path.resolve()`. Eine aus dem Renderer kommende ID wie `../backends-evil`
+  wurde akzeptiert und das Nachbarverzeichnis rekursiv gelöscht. Erlaubt sind
+  jetzt nur bekannte Backend-IDs; zusätzlich wird das Ziel per `path.resolve()`
+  gegen den Install-Root geprüft.
+- **Relative Redirects brachen Downloads ab.** `downloadFile`, `downloadToFile`
+  und `backends.getJson` gaben den `Location`-Header unverändert weiter; ein
+  relatives Ziel (z. B. `/datei`) ist keine gültige URL. Alle drei lösen Redirects
+  jetzt gegen die Ausgangs-URL auf (wie `models.getJson` es bereits tat).
+- **Beenden der App konnte den Modell-Server liegenlassen.** Der `before-quit`-
+  Handler war async ohne `event.preventDefault()` — Electron wartet nicht darauf.
+  Der Handler hält das Beenden jetzt an, stoppt den Server und beendet danach die App.
+- **`nvidia-smi`-Parsing: fehlende Zahlenwerte ergaben 0 statt „unbekannt“.**
+  `vramBytes`/`vramFreeBytes` (Linux und Windows) liefern jetzt `null`, wenn eine
+  Spalte nicht parsebar ist, statt `0 MB` anzuzeigen.
+
+### Changed
+
+- `npm test`: **73** Unit-Tests (vorher 63; +10 für Range/200-Zählung, echte
+  206-Fortsetzung, relative Redirects, 416 und `removeBackend`-Traversal).
+  `models.downloadFile` ist dafür exportiert.
+
 ## [1.4.2] - 2026-11-16
 
 ### Added

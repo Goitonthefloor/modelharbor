@@ -347,7 +347,14 @@ if (!gotLock) {
     if (process.platform !== 'darwin') app.quit();
   });
 
-  app.on('before-quit', async () => {
+  // Electron wartet nicht auf async-Handler: ohne preventDefault() kann der
+  // Prozess enden, bevor llama-server beendet ist (liegengebliebener Server).
+  let quitting = false;
+  app.on('before-quit', async (event) => {
+    if (quitting) return;
+    event.preventDefault();
     try { await server.stopServer(); } catch { /* ignore */ }
+    quitting = true;
+    app.quit();
   });
 }

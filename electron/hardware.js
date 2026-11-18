@@ -168,12 +168,13 @@ async function detectLinux() {
       if (!parts[0]) continue;
       const name = parts[0];
       const vramMB = parseNumber(parts[1]);
+      const freeMB = parseNumber(parts[2]);
       nvidiaNames.add(name.toLowerCase());
       gpus.push({
         vendor: 'NVIDIA',
         name,
-        vramBytes: vramMB ? Math.round(vramMB * 1024 * 1024) : null,
-        vramFreeBytes: parts[2] ? Math.round(parseNumber(parts[2]) * 1024 * 1024) : null,
+        vramBytes: vramMB != null ? Math.round(vramMB * 1024 * 1024) : null,
+        vramFreeBytes: freeMB != null ? Math.round(freeMB * 1024 * 1024) : null,
         driver: parts[3] || null,
         computeCap: parts[4] || null,
         source: 'nvidia-smi',
@@ -300,11 +301,13 @@ async function detectWindows() {
       if (!parts[0]) continue;
       nvidiaNames.add(parts[0].toLowerCase());
       require('./logger').debug(`hw(windows) nvidia-smi name=${parts[0]} vramMB=${parts[1] || 'n/a'} freeMB=${parts[2] || 'n/a'}`);
+      const totalMB = parseNumber(parts[1]);
+      const freeMB = parseNumber(parts[2]);
       gpus.push({
         vendor: 'NVIDIA',
         name: parts[0],
-        vramBytes: parts[1] ? Math.round(parseNumber(parts[1]) * 1024 * 1024) : null,
-        vramFreeBytes: parts[2] ? Math.round(parseNumber(parts[2]) * 1024 * 1024) : null,
+        vramBytes: totalMB != null ? Math.round(totalMB * 1024 * 1024) : null,
+        vramFreeBytes: freeMB != null ? Math.round(freeMB * 1024 * 1024) : null,
         driver: parts[3] || null,
         computeCap: parts[4] || null,
         source: 'nvidia-smi',

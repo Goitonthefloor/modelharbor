@@ -186,7 +186,7 @@ function downloadFile(url, dest, onProgress) {
     const req = https.get(url, { headers, timeout: 60000 }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        downloadFile(res.headers.location, dest, onProgress).then(resolve, reject);
+        downloadFile(new URL(res.headers.location, url).toString(), dest, onProgress).then(resolve, reject);
         return;
       }
       if (res.statusCode === 416 && start > 0) { res.resume(); resolve({ bytes: start, alreadyComplete: true }); return; }
@@ -201,7 +201,10 @@ function downloadFile(url, dest, onProgress) {
         return;
       }
       const total = res.headers['content-length'] ? parseInt(res.headers['content-length'], 10) + (res.statusCode === 206 ? start : 0) : null;
-      let received = start;
+      // Liefert der Server trotz Range-Header ein 200 (Range ignoriert), wird die
+      // Datei mit 'w' neu geschrieben — dann darf nicht ab `start` weitergezählt
+      // werden, sonst melden wir mehr Bytes als die Datei hat.
+      let received = res.statusCode === 206 ? start : 0;
       const out = fs.createWriteStream(dest, { flags: res.statusCode === 206 ? 'a' : 'w' });
       res.on('data', (c) => {
         received += c.length;
@@ -746,5 +749,5 @@ module.exports = {
   CATALOG, QUANT_BITS, HF,
   searchModels, searchOnnxModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit,
   downloadModel, downloadOnnxModel, parseOnnxFiles, parseOnnxFolderFiles, onnxModelFiles,
-  listLocal, deleteModel, quantFromName, quantBits, getJson,
+  listLocal, deleteModel, quantFromName, quantBits, getJson, downloadFile,
 };

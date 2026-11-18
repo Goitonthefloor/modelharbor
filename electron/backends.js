@@ -172,7 +172,7 @@ function getJson(url, timeoutMs = 20000) {
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        getJson(res.headers.location, timeoutMs).then(resolve, reject);
+        getJson(new URL(res.headers.location, url).toString(), timeoutMs).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
@@ -207,7 +207,7 @@ function downloadToFile(url, dest, onProgress, { resume = true } = {}) {
       // Redirects
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        downloadToFile(res.headers.location, dest, onProgress, { resume }).then(resolve, reject);
+        downloadToFile(new URL(res.headers.location, url).toString(), dest, onProgress, { resume }).then(resolve, reject);
         return;
       }
       if (res.statusCode === 416 && start > 0) {
@@ -223,7 +223,9 @@ function downloadToFile(url, dest, onProgress, { resume = true } = {}) {
       }
       const totalHeader = res.headers['content-length'];
       const total = totalHeader ? parseInt(totalHeader, 10) + (res.statusCode === 206 ? start : 0) : null;
-      let received = start;
+      // Bei 200 trotz Range-Header wird die Datei neu geschrieben ('w'): der
+      // Zähler muss bei 0 beginnen, nicht bei der alten Dateigröße.
+      let received = res.statusCode === 206 ? start : 0;
       const flags = res.statusCode === 206 ? 'a' : 'w';
       const out = fs.createWriteStream(dest, { flags });
       res.on('data', (chunk) => {
@@ -494,8 +496,14 @@ async function listInstalled(installRoot) {
 }
 
 async function removeBackend(installRoot, backendId) {
-  const dir = path.join(installRoot, backendId);
-  if (!dir.startsWith(installRoot)) throw new Error(i18n.t('error.invalidPath'));
+  // backendId kommt ungeprüft aus dem Renderer. Nur bekannte Backend-IDs sind
+  // erlaubt — damit sind '..', Pfadteile und Präfix-Kollisionen ausgeschlossen.
+  if (!Object.prototype.hasOwnProperty.call(BACKENDS, backendId)) {
+    throw new Error(i18n.t('error.backendUnknown', { id: backendId }));
+  }
+  const root = path.resolve(installRoot);
+  const dir = path.resolve(root, backendId);
+  if (dir !== root && !dir.startsWith(root + path.sep)) throw new Error(i18n.t('error.invalidPath'));
   await fsp.rm(dir, { recursive: true, force: true });
 }
 
