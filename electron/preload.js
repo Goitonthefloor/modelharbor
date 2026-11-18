@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('api', {
     local: () => ipcRenderer.invoke('models:local'),
     delete: (id) => ipcRenderer.invoke('models:delete', id),
     reveal: (p) => ipcRenderer.invoke('models:reveal', p),
+    sources: () => ipcRenderer.invoke('models:sources'),
+    addSource: () => ipcRenderer.invoke('models:addSource'),
+    removeSource: (dir) => ipcRenderer.invoke('models:removeSource', dir),
   },
   server: {
     start: (opts) => ipcRenderer.invoke('server:start', opts),

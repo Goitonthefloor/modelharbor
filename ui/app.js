@@ -13,6 +13,7 @@ const state = {
   backends: null,
   catalog: [],
   local: [],
+  modelSources: [],
   searchResults: [],
   filePanel: null,
   server: { running: false, starting: false, port: null, model: null, preset: null, lastModel: null, unloading: false },
@@ -942,15 +943,15 @@ function renderLocal() {
   list.innerHTML = state.local.map((m) => `
     <div class="row">
       <div class="row-main">
-        <div class="row-title">${esc(m.repo)}</div>
-        <div class="row-sub">${esc(m.file)} · ${esc(m.sizeLabel)}${m.quant ? ' · ' + esc(m.quant) : ''}</div>
+        <div class="row-title">${esc(m.repo)}${m.external ? ` <span class="badge badge-neutral" title="${esc(t('models.externalTitle'))}">${esc(t('models.externalBadge'))}</span>` : ''}</div>
+        <div class="row-sub">${esc(m.file)} · ${esc(m.sizeLabel)}${m.quant ? ' · ' + esc(m.quant) : ''}${m.external && m.sourceDir ? ' · ' + esc(t('models.fromFolder', { dir: m.sourceDir })) : ''}</div>
         <div class="fit-note" style="margin-top:4px">${esc(fitDetail(m.fit))}</div>
       </div>
       <div class="row-actions">
         ${fitBadge(m.fit)}
         <button class="btn btn-primary btn-sm" data-act="load-local" data-id="${esc(m.id)}">${esc(t('models.load'))}</button>
         <button class="btn btn-ghost btn-sm" data-act="reveal" data-path="${esc(m.path)}" title="${esc(t('models.revealTitle'))}">${esc(t('models.folder'))}</button>
-        <button class="btn btn-danger-ghost btn-sm" data-act="delete-local" data-id="${esc(m.id)}">${esc(t('common.delete'))}</button>
+        ${m.external ? '' : `<button class="btn btn-danger-ghost btn-sm" data-act="delete-local" data-id="${esc(m.id)}">${esc(t('common.delete'))}</button>`}
       </div>
     </div>`).join('');
 }
@@ -961,6 +962,15 @@ async function refreshLocal() {
     renderLocal();
   } catch (e) {
     $('#local-list').innerHTML = `<div class="empty-note">${esc(t('models.localError', { message: e.message }))}</div>`;
+  }
+}
+
+// Zusätzliche Modellordner (Quelle der „Extern“-Modelle)
+async function refreshModelSources() {
+  try {
+    state.modelSources = (await bridge.models.sources()) || [];
+  } catch {
+    state.modelSources = [];
   }
 }
 
@@ -1094,6 +1104,15 @@ function renderSetup() {
         <button class="btn btn-ghost btn-sm" data-act="pick-models">${esc(t('setup.change'))}</button>
         <button class="btn btn-ghost btn-sm" data-act="open-models">${esc(t('setup.open'))}</button>
       </div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('setup.extraDirs'))}</strong><span>${esc(t('setup.extraDirsHint'))}</span></div>
+        <button class="btn btn-primary btn-sm" data-act="add-source">${esc(t('setup.addSource'))}</button>
+      </div>
+      ${state.modelSources.length ? state.modelSources.map((s) => `
+      <div class="settings-row">
+        <div class="path-box">${esc(s.dir)}${s.exists ? '' : ` — ${esc(t('setup.sourceMissing'))}`}</div>
+        <button class="btn btn-ghost btn-sm" data-act="remove-source" data-dir="${esc(s.dir)}">${esc(t('setup.removeSource'))}</button>
+      </div>`).join('') : `<div class="settings-row"><div class="muted">${esc(t('setup.noSources'))}</div></div>`}
       <div class="settings-row">
         <div class="settings-label"><strong>${esc(t('setup.ctxLabel'))}</strong><span>${esc(t('setup.ctxHint'))}</span></div>
         <input type="number" class="num-input" id="set-ctx" min="1024" max="131072" step="1024" value="${esc(state.settings?.ctx || 8192)}">
@@ -1320,6 +1339,26 @@ function bindEvents() {
       } catch (err) { toast(err.message, 'error', 7000); }
     }
     if (act === 'open-models') { ipc(bridge.shell.showModels()); }
+    if (act === 'add-source') {
+      try {
+        const res = await bridge.models.addSource();
+        if (res && !res.canceled) {
+          toast(t('toast.sourceAdded', { count: res.count }), 'ok', 6000);
+          await refreshModelSources();
+          await refreshLocal();
+          renderSetup();
+        }
+      } catch (err) { toast(err.message, 'error', 8000); }
+    }
+    if (act === 'remove-source') {
+      try {
+        await bridge.models.removeSource(btn.dataset.dir);
+        toast(t('toast.sourceRemoved'), 'ok', 5000);
+        await refreshModelSources();
+        await refreshLocal();
+        renderSetup();
+      } catch (err) { toast(err.message, 'error', 8000); }
+    }
     if (act === 'onboarding-done') {
       try {
         state.settings = await bridge.settings.set({ onboardingDone: true });
@@ -1507,6 +1546,7 @@ async function init() {
     renderSidebar();
     renderChatState();
 
+    refreshModelSources();
     refreshLocal();
     refreshCatalog();
 

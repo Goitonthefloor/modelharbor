@@ -44,4 +44,13 @@ function withinRoot(root, candidate) {
   return target;
 }
 
-module.exports = { isWithin, childPath, withinRoot };
+/** Liegt `candidate` in IRGENDEINEM der Roots (echter Präfix, nicht nur String)? */
+function withinAnyRoot(roots, candidate) {
+  const list = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
+  for (const r of list) {
+    try { return withinRoot(r, candidate); } catch { /* nächster Root */ }
+  }
+  throw new Error(i18n.t('error.invalidPath'));
+}
+
+module.exports = { isWithin, childPath, withinRoot, withinAnyRoot };

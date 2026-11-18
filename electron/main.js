@@ -10,7 +10,7 @@ const models = require('./models');
 const server = require('./server');
 const updater = require('./updater');
 const logger = require('./logger');
-const { childPath, withinRoot } = require('./paths');
+const { childPath, withinRoot, withinAnyRoot } = require('./paths');
 const { PRESETS } = require('./presets');
 const i18n = require('../ui/i18n');
 
@@ -25,6 +25,11 @@ let activeUpdate = null;
 
 function userDataDir() { return app.getPath('userData'); }
 
+/** Alle Ordner, aus denen Modelle geladen werden dürfen (Haupt- + Zusatzordner). */
+function modelRoots() {
+  return [settings.modelsDir, ...(settings.extraModelDirs || [])].filter(Boolean);
+}
+
 function defaultSettings() {
   const base = userDataDir();
   return {
@@ -37,6 +42,7 @@ function defaultSettings() {
     onboardingDone: false,
     language: 'de',
     debugLog: false,
+    extraModelDirs: [],
   };
 }
 
@@ -53,6 +59,7 @@ function loadSettings() {
   }
   logger.configure({ debug: settings.debugLog, dir: userDataDir() });
   i18n.setLang(settings.language);
+  if (!Array.isArray(settings.extraModelDirs)) settings.extraModelDirs = [];
   for (const d of [settings.modelsDir, settings.backendsDir]) {
     try { fs.mkdirSync(d, { recursive: true }); } catch { /* ignore */ }
   }
@@ -61,6 +68,7 @@ function loadSettings() {
 
 async function saveSettings(patch) {
   settings = { ...(settings || defaultSettings()), ...patch };
+  if (!Array.isArray(settings.extraModelDirs)) settings.extraModelDirs = [];
   i18n.setLang(settings.language);
   const file = path.join(userDataDir(), 'settings.json');
   await fsp.mkdir(path.dirname(file), { recursive: true });
@@ -229,7 +237,7 @@ function registerIpc() {
 
   ipcMain.handle('models:local', async () => {
     const hw = await scanHardwareCached();
-    const list = await models.listLocal(settings.modelsDir);
+    const list = await models.listLocal(settings.modelsDir, settings.extraModelDirs);
     return list.map((m) => ({ ...m, fit: models.evaluateFit(m.sizeBytes, m.file, hw, settings.ctx || 8192) }));
   });
 
@@ -239,8 +247,43 @@ function registerIpc() {
   });
 
   ipcMain.handle('models:reveal', async (_e, filePath) => {
-    shell.showItemInFolder(withinRoot(settings.modelsDir, filePath));
+    shell.showItemInFolder(withinAnyRoot(modelRoots(), filePath));
     return true;
+  });
+
+  /* ------------------- Zusätzliche Modellordner ------------------- */
+
+  ipcMain.handle('models:sources', async () => {
+    const dirs = settings.extraModelDirs || [];
+    return dirs.map((dir, index) => ({
+      index,
+      dir,
+      exists: fs.existsSync(dir),
+    }));
+  });
+
+  ipcMain.handle('models:addSource', async () => {
+    const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
+    if (res.canceled || !res.filePaths.length) return { canceled: true, sources: settings.extraModelDirs };
+    const dir = path.resolve(res.filePaths[0]);
+    let st = null;
+    try { st = await fsp.stat(dir); } catch { /* fehlt */ }
+    if (!st || !st.isDirectory()) throw new Error(i18n.t('error.sourceInvalid'));
+    if (dir === path.resolve(settings.modelsDir)) throw new Error(i18n.t('error.sourceIsModelsDir'));
+    const list = settings.extraModelDirs || [];
+    if (list.some((d) => path.resolve(d) === dir)) throw new Error(i18n.t('error.sourceDuplicate'));
+    const next = [...list, dir];
+    await saveSettings({ extraModelDirs: next });
+    const found = await models.scanModelRoot(dir, { external: true, sourceIndex: next.length - 1, maxDepth: 2 });
+    return { canceled: false, dir, count: found.length, sources: next };
+  });
+
+  ipcMain.handle('models:removeSource', async (_e, dir) => {
+    // Entfernt nur den Eintrag — die Dateien im Ordner bleiben unangetastet.
+    const target = path.resolve(String(dir || ''));
+    const next = (settings.extraModelDirs || []).filter((d) => path.resolve(d) !== target);
+    await saveSettings({ extraModelDirs: next });
+    return { removed: dir, sources: next };
   });
 
   ipcMain.handle('server:start', async (_e, opts) => {
@@ -248,9 +291,17 @@ function registerIpc() {
     const wanted = opts.backendId || (hwCache && hwCache.recommendation ? hwCache.recommendation.primary : null);
     let backend = installed.find((b) => b.id === wanted) || installed[0];
     if (!backend) throw new Error(i18n.t('error.noBackend'));
+    // Modellpfad muss aus einem eingerichteten Modellordner stammen (Haupt- oder
+    // Zusatzordner) — der Renderer liefert den Pfad, also wird er hier geprüft.
+    let modelPath;
+    try {
+      modelPath = withinAnyRoot(modelRoots(), opts.modelPath);
+    } catch {
+      throw new Error(i18n.t('error.modelPathOutside'));
+    }
     const result = await server.startServer({
       serverPath: backend.serverPath,
-      modelPath: opts.modelPath,
+      modelPath,
       presetId: opts.preset || settings.lastPreset || 'balanced',
       onnxPython: backend && backend.id === 'onnx' ? backend.serverPath : undefined,
       overrides: { ...(opts.overrides || {}), ctx: opts.ctx || settings.ctx, gpuLayers: opts.gpuLayers !== undefined ? opts.gpuLayers : settings.gpuLayers },

@@ -670,73 +670,117 @@ async function downloadOnnxModel({ repo, onnxSub, modelsDir, onProgress = () => 
 const ONNX_MODEL_FILE_RE = /\.(onnx(\.data)?|fconst|state)$/i;
 const ONNX_MIN_MODEL_BYTES = 50 * 1024 * 1024; // config-only-Ordner aussortieren
 
-async function listLocal(modelsDir) {
+/** Kennung fuer Modelle aus zusaetzlichen Ordnern: ext<Index>:<relDir>/<key> */
+const EXTERNAL_ID_RE = /^ext(\d+):/;
+function isExternalId(id) { return EXTERNAL_ID_RE.test(String(id || '')); }
+
+/** Modelle in EINEM Verzeichnis: GGUF-Gruppen (inkl. Splits) oder ein ONNX-Ordner. */
+async function modelsInDir(dirPath, relDir, { external, sourceIndex, sourceDir }) {
   const out = [];
-  let repos = [];
-  try { repos = await fsp.readdir(modelsDir, { withFileTypes: true }); } catch { return out; }
-  for (const d of repos) {
-    if (!d.isDirectory()) continue;
-    const dirPath = path.join(modelsDir, d.name);
-    let files = [];
-    try { files = await fsp.readdir(dirPath); } catch { continue; }
-    // mmproj/imatrix & Co. sind Hilfsdateien, keine eigenständigen Modelle
-    const ggufs = files.filter((f) => f.toLowerCase().endsWith('.gguf') && !isAuxiliary(f)).sort();
-    if (!ggufs.length) {
-      // ONNX-/GenAI-Modellordner: genai_config.json im Root UND mindestens eine
-      // echte große Modelldatei (.onnx/.onnx.data/.fconst/.state ab 50 MB).
-      if (!files.includes('genai_config.json')) continue;
-      let size = 0;
-      let biggest = 0;
-      let modelFiles = 0;
-      for (const f of files) {
-        if (!ONNX_MODEL_FILE_RE.test(f)) continue;
-        try {
-          const st = await fsp.stat(path.join(dirPath, f));
-          if (!st.isFile()) continue;
-          size += st.size;
-          modelFiles += 1;
-          if (st.size > biggest) biggest = st.size;
-        } catch { /* ignore */ }
-      }
-      if (!modelFiles || biggest < ONNX_MIN_MODEL_BYTES) continue;
-      out.push({
-        id: `${d.name}/onnx`,
-        repo: d.name.replace(/__/g, '/'),
-        file: `ONNX-${d.name}`,
-        isOnnx: true,
-        parts: [],
-        path: dirPath,
-        sizeBytes: size,
-        sizeLabel: `${(size / 1073741824).toFixed(2)} GB`,
-        quant: null,
-        dir: dirPath,
-      });
-      continue;
+  const dirName = path.basename(dirPath);
+  let files = [];
+  try { files = await fsp.readdir(dirPath); } catch { return out; }
+  // mmproj/imatrix & Co. sind Hilfsdateien, keine eigenstaendigen Modelle
+  const ggufs = files.filter((f) => f.toLowerCase().endsWith('.gguf') && !isAuxiliary(f)).sort();
+  const repo = (relDir || dirName).replace(/__/g, '/');
+  const mkId = (key) => (external
+    ? `ext${sourceIndex}:${relDir ? relDir + '/' : ''}${key}`
+    : `${dirName}/${key}`);
+  const origin = external ? { external: true, sourceIndex, sourceDir } : { external: false };
+
+  if (!ggufs.length) {
+    // ONNX-/GenAI-Modellordner: genai_config.json UND eine echte grosse
+    // Modelldatei (.onnx/.onnx.data/.fconst/.state ab 50 MB).
+    if (!files.includes('genai_config.json')) return out;
+    let size = 0;
+    let biggest = 0;
+    let modelFiles = 0;
+    for (const f of files) {
+      if (!ONNX_MODEL_FILE_RE.test(f)) continue;
+      try {
+        const st = await fsp.stat(path.join(dirPath, f));
+        if (!st.isFile()) continue;
+        size += st.size;
+        modelFiles += 1;
+        if (st.size > biggest) biggest = st.size;
+      } catch { /* ignore */ }
     }
-    // Splits gruppieren
-    const groups = new Map();
-    for (const f of ggufs) {
-      const key = splitKey(f);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(f);
-    }
-    for (const [key, parts] of groups) {
-      let size = 0;
-      for (const p of parts) { try { size += (await fsp.stat(path.join(dirPath, p))).size; } catch { /* ignore */ } }
-      out.push({
-        id: `${d.name}/${key}`,
-        repo: d.name.replace(/__/g, '/'),
-        file: key,
-        parts: parts.map((p) => path.join(dirPath, p)),
-        path: path.join(dirPath, parts[0]),
-        sizeBytes: size,
-        sizeLabel: `${(size / 1073741824).toFixed(2)} GB`,
-        quant: quantFromName(key),
-        dir: dirPath,
-      });
-    }
+    if (!modelFiles || biggest < ONNX_MIN_MODEL_BYTES) return out;
+    out.push({
+      id: mkId('onnx'),
+      repo,
+      file: `ONNX-${dirName}`,
+      isOnnx: true,
+      parts: [],
+      path: dirPath,
+      sizeBytes: size,
+      sizeLabel: `${(size / 1073741824).toFixed(2)} GB`,
+      quant: null,
+      dir: dirPath,
+      ...origin,
+    });
+    return out;
   }
-  out.sort((a, b) => a.repo.localeCompare(b.repo));
+
+  const groups = new Map();
+  for (const f of ggufs) {
+    const key = splitKey(f);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
+  }
+  for (const [key, parts] of groups) {
+    let size = 0;
+    for (const pp of parts) { try { size += (await fsp.stat(path.join(dirPath, pp))).size; } catch { /* ignore */ } }
+    out.push({
+      id: mkId(key),
+      repo,
+      file: key,
+      parts: parts.map((pp) => path.join(dirPath, pp)),
+      path: path.join(dirPath, parts[0]),
+      sizeBytes: size,
+      sizeLabel: `${(size / 1073741824).toFixed(2)} GB`,
+      quant: quantFromName(key),
+      dir: dirPath,
+      ...origin,
+    });
+  }
+  return out;
+}
+
+/**
+ * Scannt einen Modell-Root. `maxDepth` = Ordnerebenen unter dem Root: der eigene
+ * Modellordner hat eine (Repo-Ordner), fremde Ablagen oft zwei
+ * (z. B. LM Studio: <publisher>/<model>/<datei>.gguf).
+ */
+async function scanModelRoot(root, { external = false, sourceIndex = -1, maxDepth = 1 } = {}) {
+  const out = [];
+  const walk = async (absDir, relDir, depth) => {
+    out.push(...await modelsInDir(absDir, relDir, { external, sourceIndex, sourceDir: root }));
+    if (depth >= maxDepth) return;
+    let subs = [];
+    try { subs = await fsp.readdir(absDir, { withFileTypes: true }); } catch { return; }
+    for (const s of subs) {
+      if (!s.isDirectory()) continue;
+      await walk(path.join(absDir, s.name), relDir ? `${relDir}/${s.name}` : s.name, depth + 1);
+    }
+  };
+  await walk(path.resolve(root), '', 0);
+  return out;
+}
+
+/**
+ * Alle lokal verfuegbaren Modelle: aus dem eigenen Modellordner und aus
+ * zusaetzlichen Ordnern (`external: true`). Modelle aus fremden Ordnern werden
+ * geladen und angezeigt, aber nicht geloescht — die Dateien gehoeren nicht dieser App.
+ */
+async function listLocal(modelsDir, extraDirs = []) {
+  const out = await scanModelRoot(modelsDir, { external: false, maxDepth: 1 });
+  const extras = Array.isArray(extraDirs) ? extraDirs : [];
+  for (let i = 0; i < extras.length; i++) {
+    if (!extras[i]) continue;
+    out.push(...await scanModelRoot(extras[i], { external: true, sourceIndex: i, maxDepth: 2 }));
+  }
+  out.sort((a, b) => a.repo.localeCompare(b.repo) || String(a.file).localeCompare(String(b.file)));
   return out;
 }
 
@@ -748,6 +792,8 @@ async function listLocal(modelsDir) {
  */
 async function deleteModel(modelsDir, modelId) {
   const id = String(modelId || '');
+  // Modelle aus zusaetzlichen Ordnern gehoeren nicht dieser App -> nicht loeschen
+  if (isExternalId(id)) throw new Error(i18n.t('error.externalModelDelete'));
   const idx = id.indexOf('/');
   const dirName = idx < 0 ? id : id.slice(0, idx);
   const key = idx < 0 ? '' : id.slice(idx + 1);
@@ -776,4 +822,5 @@ module.exports = {
   searchModels, searchOnnxModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit,
   downloadModel, downloadOnnxModel, parseOnnxFiles, parseOnnxFolderFiles, onnxModelFiles,
   listLocal, deleteModel, quantFromName, quantBits, getJson, downloadFile,
+  scanModelRoot, isExternalId,
 };

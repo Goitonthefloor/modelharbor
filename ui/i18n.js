@@ -111,6 +111,12 @@
     'models.openChat': { de: 'Chat öffnen', en: 'Open chat' },
     'models.load': { de: 'Laden', en: 'Load' },
     'models.revealTitle': { de: 'Im Ordner zeigen', en: 'Show in folder' },
+    'models.externalBadge': { de: 'Extern', en: 'External' },
+    'models.externalTitle': {
+      de: 'Aus einem zusätzlichen Ordner — laden ja, löschen nein',
+      en: 'From an additional folder — load yes, delete no',
+    },
+    'models.fromFolder': { de: 'aus {dir}', en: 'from {dir}' },
     'models.folder': { de: 'Ordner', en: 'Folder' },
     'models.localEmpty': {
       de: 'Noch keine Modelle heruntergeladen.<br>Stöbere im Katalog oder auf HuggingFace.',
@@ -174,6 +180,16 @@
     'setup.languageHint': { de: 'Sprache der Oberfläche — wirkt sofort', en: 'Interface language — applies immediately' },
     'setup.modelsDir': { de: 'Modellordner', en: 'Model folder' },
     'setup.modelsDirHint': { de: 'Hierhin werden GGUF-Dateien geladen', en: 'GGUF files are downloaded here' },
+    'setup.extraDirs': { de: 'Weitere Modellordner', en: 'Additional model folders' },
+    'setup.extraDirsHint': {
+      de: 'Modelle aus anderen Ordnern laden (z. B. LM Studio, zweite Platte). Sie werden angezeigt und nutzbar, aber nicht gelöscht.',
+      en: 'Load models from other folders (e.g. LM Studio, second drive). They are listed and usable, but never deleted.',
+    },
+    'setup.addSource': { de: 'Ordner hinzufügen', en: 'Add folder' },
+    'setup.removeSource': { de: 'Entfernen', en: 'Remove' },
+    'setup.noSources': { de: 'Keine weiteren Ordner eingetragen', en: 'No additional folders yet' },
+    'setup.sourceMissing': { de: 'nicht gefunden', en: 'not found' },
+    'setup.sourceModels': { de: '{count} Modelle', en: '{count} models' },
     'setup.change': { de: 'Ändern', en: 'Change' },
     'setup.open': { de: 'Öffnen', en: 'Open' },
     'setup.ctxLabel': { de: 'Kontextgröße', en: 'Context size' },
@@ -227,6 +243,14 @@
     'toast.modelDeleted': { de: 'Modell gelöscht', en: 'Model deleted' },
     'toast.backendInstalled': { de: 'Backend installiert: {id}', en: 'Backend installed: {id}' },
     'toast.modelsDirChanged': { de: 'Modellordner geändert', en: 'Model folder changed' },
+    'toast.sourceAdded': {
+      de: 'Modellordner hinzugefügt — {count} Modelle gefunden',
+      en: 'Model folder added — {count} models found',
+    },
+    'toast.sourceRemoved': {
+      de: 'Ordner aus der Liste entfernt (Dateien bleiben erhalten)',
+      en: 'Folder removed from the list (files are kept)',
+    },
     'toast.ctx': { de: 'Kontext: {value} Tokens', en: 'Context: {value} tokens' },
     'toast.gpuLayers': { de: 'GPU-Layers: {value}', en: 'GPU layers: {value}' },
     'toast.debugLog': { de: 'Erweitertes Log: {value}', en: 'Extended log: {value}' },
@@ -334,6 +358,23 @@
     'error.downloadTimeout': { de: 'Zeitüberschreitung beim Download', en: 'Timeout during download' },
     'error.fileNotInRepo': { de: 'Datei {file} wurde im Repo nicht gefunden', en: 'File {file} was not found in the repo' },
     'error.invalidPath': { de: 'Ungültiger Pfad', en: 'Invalid path' },
+    'error.externalModelDelete': {
+      de: 'Modelle aus zusätzlichen Ordnern werden hier nicht gelöscht — bitte im ursprünglichen Ordner entfernen.',
+      en: 'Models from additional folders are not deleted here — remove them in their original folder.',
+    },
+    'error.modelPathOutside': {
+      de: 'Modellpfad liegt außerhalb der eingerichteten Modellordner.',
+      en: 'Model path is outside the configured model folders.',
+    },
+    'error.sourceInvalid': {
+      de: 'Ordner existiert nicht oder ist kein Verzeichnis.',
+      en: 'Folder does not exist or is not a directory.',
+    },
+    'error.sourceDuplicate': { de: 'Dieser Ordner ist bereits eingetragen.', en: 'This folder is already listed.' },
+    'error.sourceIsModelsDir': {
+      de: 'Das ist bereits der Haupt-Modellordner.',
+      en: 'This is already the main model folder.',
+    },
     'error.githubInvalidJson': { de: 'Ungültige JSON-Antwort von GitHub', en: 'Invalid JSON response from GitHub' },
     'error.githubTimeout': { de: 'Zeitüberschreitung bei GitHub', en: 'Timeout while contacting GitHub' },
     'error.noReleaseList': { de: 'GitHub-API lieferte keine Release-Liste', en: 'GitHub API returned no release list' },

@@ -341,6 +341,71 @@ with sync_playwright() as p:
           dl["hasHandler"] and dl["afterStart"] == dl["before"] + 1 and dl["afterEvent"] == dl["afterStart"],
           json.dumps(dl))
 
+    # Feature: Modelle aus zusaetzlichen Ordnern (extern markiert, nicht loeschbar)
+    page.evaluate("setView('models'); setTab('local')")
+    page.wait_for_timeout(200)
+    feat = page.evaluate("""async () => {
+      window.api.models.local = async () => ([
+        { id: 'owner__model/model-Q4_K_M.gguf', repo: 'owner/model', file: 'model-Q4_K_M.gguf',
+          sizeLabel: '4.2 GB', path: '/tmp/models/owner__model/model-Q4_K_M.gguf', quant: 'Q4_K_M',
+          external: false, fit: { verdict: 'gpu', label: 'GPU', detail: 'passt', gpuLayers: 999 } },
+        { id: 'ext0:fremd/modell-Q4_K_M.gguf', repo: 'fremd/modell', file: 'modell-Q4_K_M.gguf',
+          sizeLabel: '5.0 GB', path: '/tmp/andere-platte/fremd/modell-Q4_K_M.gguf', quant: 'Q4_K_M',
+          external: true, sourceDir: '/tmp/andere-platte', sourceIndex: 0,
+          fit: { verdict: 'gpu', label: 'GPU', detail: 'passt', gpuLayers: 999 } },
+      ]);
+      window.__sources = [{ index: 0, dir: '/tmp/andere-platte', exists: true }];
+      window.api.models.sources = async () => window.__sources;
+      window.api.models.addSource = async () => {
+        window.__sources = [...window.__sources, { index: window.__sources.length, dir: '/tmp/zweiter', exists: true }];
+        return { canceled: false, dir: '/tmp/zweiter', count: 3, sources: window.__sources };
+      };
+      window.api.models.removeSource = async (dir) => {
+        window.__sources = window.__sources.filter(s => s.dir !== dir);
+        return { removed: dir, sources: window.__sources };
+      };
+      await refreshLocal();
+      await refreshModelSources();
+      const rows = [...document.querySelectorAll('#local-list .row')];
+      const ext = rows.find(r => r.textContent.includes('fremd/modell'));
+      const own = rows.find(r => r.textContent.includes('owner/model'));
+      return {
+        rowCount: rows.length,
+        extBadge: ext ? ext.textContent.includes('Extern') : false,
+        extHasDelete: ext ? !!ext.querySelector('[data-act="delete-local"]') : null,
+        ownHasDelete: own ? !!own.querySelector('[data-act="delete-local"]') : null,
+        extHasLoad: ext ? !!ext.querySelector('[data-act="load-local"]') : false,
+        extShowsSource: ext ? ext.textContent.includes('/tmp/andere-platte') : false,
+      };
+    }""")
+    check("Zusatzordner: externes Modell mit Badge, Laden ja / Loeschen nein",
+          feat["rowCount"] == 2 and feat["extBadge"] and feat["extHasLoad"]
+          and feat["extHasDelete"] is False and feat["ownHasDelete"] is True
+          and feat["extShowsSource"],
+          json.dumps(feat, ensure_ascii=False))
+
+    page.evaluate("setView('setup')")
+    page.wait_for_timeout(250)
+    src = page.evaluate("""async () => {
+      clearToasts();
+      renderSetup();
+      const count = () => document.querySelectorAll('[data-act="remove-source"]').length;
+      const before = count();
+      const hasAdd = !!document.querySelector('[data-act="add-source"]');
+      document.querySelector('[data-act="add-source"]').click();
+      await new Promise(r => setTimeout(r, 500));
+      const afterAdd = count();
+      const toasts = [...document.querySelectorAll('#toast-wrap .toast-msg')].map(e => e.textContent);
+      document.querySelector('[data-act="remove-source"]').click();
+      await new Promise(r => setTimeout(r, 500));
+      return { before, afterAdd, afterRemove: count(), hasAdd, toasts,
+               listed: [...document.querySelectorAll('.path-box')].map(e => e.textContent) };
+    }""")
+    check("Zusatzordner: hinzufuegen/entfernen in den Einstellungen",
+          src["hasAdd"] and src["before"] == 1 and src["afterAdd"] == 2 and src["afterRemove"] == 1
+          and any("3 Modelle" in x for x in src["toasts"]),
+          json.dumps(src, ensure_ascii=False))
+
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))
 

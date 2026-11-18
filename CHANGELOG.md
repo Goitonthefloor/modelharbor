@@ -2,6 +2,42 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.5.0] - 2026-11-18
+
+### Added
+
+- **Modelle aus weiteren Ordnern laden.** Unter Setup → „Weitere Modellordner“ lassen sich
+  beliebige Ordner hinzufügen, die schon Modelle enthalten — z. B. eine bestehende
+  LM-Studio-Sammlung, eine zweite Platte oder eine NAS-Freigabe. Die Modelle erscheinen im
+  Tab „Lokal“ mit Badge **Extern** und Angabe des Herkunftsordners und lassen sich genau wie
+  heruntergeladene Modelle laden.
+  - Fremde Ablagen werden **zwei Ebenen tief** durchsucht (`<publisher>/<model>/<datei>.gguf`),
+    der eigene Modellordner bleibt bei einer Ebene (Repo-Ordner).
+  - Erkannt werden GGUF (inkl. Split-Parts, die zu einem Modell gruppiert werden) und
+    ONNX-/GenAI-Ordner.
+  - Die **Fit-Bewertung** (GPU / teilweise / nur RAM / zu groß) gilt auch für externe Modelle.
+  - Externe Modelle werden **nie gelöscht**: die Dateien gehören nicht dieser App. Der
+    Lösch-Button fehlt, und ein Löschversuch über die API wird mit klarer Meldung abgelehnt.
+  - „Entfernen“ nimmt nur den Ordner aus der Liste — die Dateien bleiben unangetastet.
+  - Doppelte Ordner, der Haupt-Modellordner selbst und nicht existierende Pfade werden
+    abgelehnt; fehlende Ordner werden in der Liste als „nicht gefunden“ markiert.
+- Neue IPC-Schnittstelle `models:sources` / `models:addSource` / `models:removeSource`
+  (Ordnerwahl über den nativen Dialog, Validierung und Persistenz im Hauptprozess).
+- `server:start` prüft den Modellpfad jetzt gegen **alle** eingerichteten Modellordner
+  (`withinAnyRoot`), nicht mehr nur gegen den Hauptordner.
+
+### Changed
+
+- `models.listLocal(modelsDir, extraDirs)` ist in `modelsInDir` / `scanModelRoot` zerlegt;
+  externe Modelle tragen `external`, `sourceDir`, `sourceIndex` und eine eindeutige ID
+  (`ext<Index>:<pfad>/<datei>`), damit sich Ordner mit gleichen Namen nicht in die Quere kommen.
+- `npm test`: **108** Unit-Tests (vorher 98; +10 für Zusatzordner, verschachtelte Ablagen,
+  ONNX im Fremdordner, Split-Gruppierung, Löschschutz, `withinAnyRoot`).
+  UI-Smoke **27/27** (+2 Checks: Extern-Badge mit Laden-ja/Löschen-nein, Ordner
+  hinzufügen/entfernen in den Einstellungen).
+- Zusätzlich echt End-to-End geprüft (reale Electron-App, echte Dateien, echte IPC):
+  14/14 Checks inkl. Persistenz in `settings.json` und intakter Fremddateien nach Remove.
+
 ## [1.4.5] - 2026-11-18
 
 ### Fixed

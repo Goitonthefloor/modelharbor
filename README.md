@@ -25,6 +25,13 @@ right way.
 - **Models that match your machine.** For every model the catalog shows whether it fits
   fully into VRAM, is partly offloaded to the GPU, or only runs in RAM. The app also picks
   a matching quantization (Q4_K_M, Q6_K and so on).
+- **Models from your own folders.** Under Setup → *Additional model folders* you can add any
+  folder that already holds models — an existing LM Studio collection, a second drive, a NAS
+  share. Those models show up in the *Local* tab with an **External** badge and their source
+  folder, and load exactly like downloaded ones. Nested layouts (`publisher/model/file.gguf`)
+  are scanned two levels deep, GGUF splits and ONNX folders are recognised, and the hardware
+  fit is calculated for them too. External models are never deleted by the app: *Remove* only
+  takes the folder off the list, the files stay where they are.
 - **HuggingFace search.** You can search any GGUF repo, check file size and the hardware
   estimate before downloading, and then load it. Downloads resume after an interruption and
   multi-part models are fetched completely.
@@ -63,12 +70,12 @@ The ready-made packages live in `dist/`:
 
 | Platform | File | Status |
 |---|---|---|
-| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.4.5.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
-| Linux (x64) | `dist/ModelHarbor-1.4.5.AppImage` | built, start-tested (121 MB) |
+| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.5.0.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
+| Linux (x64) | `dist/ModelHarbor-1.5.0.AppImage` | built, start-tested (121 MB) |
 | macOS (Apple Silicon / Intel) | `ModelHarbor-1.2.2-arm64.dmg` / `-x64.dmg` | build with `npm run dist:mac` (on a Mac) |
 
 Both current packages are attached to the [GitHub release](https://github.com/Goitonthefloor/modelharbor/releases/latest)
-as `ModelHarbor-1.4.5.AppImage` and `ModelHarbor-Setup-1.4.5.exe`.
+as `ModelHarbor-1.5.0.AppImage` and `ModelHarbor-Setup-1.5.0.exe`.
 
 On first start the app walks you through the setup: check hardware, install a backend,
 pick a model.
