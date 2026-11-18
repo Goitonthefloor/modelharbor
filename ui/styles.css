@@ -332,6 +332,7 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 .badge-ram { color: #93c5fd; background: rgba(96,165,250,.1); border-color: rgba(96,165,250,.25); }
 .badge-big { color: #fca5a5; background: rgba(248,113,113,.1); border-color: rgba(248,113,113,.25); }
 .badge-neutral { color: var(--text-dim); background: rgba(255,255,255,.04); border-color: var(--border); }
+.badge-custom { color: var(--accent-ink); background: rgba(45,212,191,.1); border-color: rgba(45,212,191,.3); }
 .badge-exp { color: #c4b5fd; background: rgba(167,139,250,.1); border-color: rgba(167,139,250,.25); }
 .badge-tag { color: var(--muted); background: rgba(255,255,255,.03); border-color: var(--border-soft); }
 
@@ -455,6 +456,31 @@ dialog::backdrop {
 .dialog-body h2 { margin: 0 0 8px; font-size: 17px; letter-spacing: -.2px; }
 .dialog-body p { margin: 0 0 18px; color: var(--text-dim); font-size: 13.5px; line-height: 1.5; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin: 0; }
+
+/* ---------- Modell-Einstellungen ---------- */
+#model-settings-dialog { max-width: min(560px, calc(100vw - 40px)); }
+.ms-body { display: flex; flex-direction: column; max-height: min(82vh, 760px); overflow: hidden; }
+.ms-body > h2, .ms-body > .ms-model, .ms-body > .ms-hint { flex: none; }
+#ms-fields { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+/* Scroll-Container sind implizit fokussierbar: Fokus sichtbar, aber dezent halten. */
+#ms-fields:focus-visible { outline: 1px solid var(--border); outline-offset: -1px; }
+.ms-body > .ms-kv, .ms-body > .ms-note, .ms-body > .dialog-actions { flex: none; }
+.ms-model { margin: 0 0 6px; font-family: var(--mono); font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+.ms-hint { margin: 0 0 14px; font-size: 12.5px; color: var(--text-dim); }
+.ms-section { margin: 14px 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-ink); }
+.ms-section-hint { margin: 0 0 8px; font-size: 11.8px; color: var(--muted); }
+.ms-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.ms-row label { flex: 1; font-size: 13px; }
+.ms-row label span { display: block; font-size: 11.3px; color: var(--muted); margin-top: 1px; }
+.ms-row .num-input { width: 110px; }
+.ms-row select {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; font-size: 12.5px; min-width: 130px;
+}
+.ms-kv { margin: 12px 0 0; font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+.ms-note { margin: 8px 0 0; font-size: 12px; color: var(--warn, #fbbf24); }
+.ms-body .dialog-actions { margin-top: 16px; flex-wrap: wrap; }
+.ms-body .dialog-actions #ms-reset { margin-right: auto; }
 
 /* ---------- Update-Dialog ---------- */
 .is-hidden { display: none !important; }

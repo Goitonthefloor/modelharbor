@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('api', {
     addSource: () => ipcRenderer.invoke('models:addSource'),
     removeSource: (dir) => ipcRenderer.invoke('models:removeSource', dir),
   },
+  modelSettings: {
+    schema: () => ipcRenderer.invoke('modelSettings:schema'),
+    get: (modelId) => ipcRenderer.invoke('modelSettings:get', modelId),
+    set: (modelId, patch) => ipcRenderer.invoke('modelSettings:set', modelId, patch),
+    reset: (modelId) => ipcRenderer.invoke('modelSettings:reset', modelId),
+  },
   server: {
     start: (opts) => ipcRenderer.invoke('server:start', opts),
     stop: () => ipcRenderer.invoke('server:stop'),

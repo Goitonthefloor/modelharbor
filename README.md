@@ -32,6 +32,15 @@ right way.
   are scanned two levels deep, GGUF splits and ONNX folders are recognised, and the hardware
   fit is calculated for them too. External models are never deleted by the app: *Remove* only
   takes the folder off the list, the files stay where they are.
+- **Per-model settings, including KV cache quantization.** The gear icon on any model (and in
+  the chat header for the loaded one) opens a settings dialog stored per model: context length,
+  GPU layers, flash attention (auto/on/off), **separate K and V cache types**
+  (`f16, bf16, f32, q8_0, q5_1, q5_0, q4_1, q4_0, iq4_nl`), batch and micro-batch size, CPU
+  threads, mlock, mmap off and RoPE base/scale — the same knobs LM Studio exposes. A live
+  readout shows the KV cache size for the chosen context and types, and the hardware fit is
+  recalculated with them (q4_0/q4_0 needs about 28 % of the f16 cache). A quantized V cache
+  forces flash attention, as llama.cpp requires. Empty fields fall back to the global defaults;
+  models with overrides carry a **Custom** badge.
 - **HuggingFace search.** You can search any GGUF repo, check file size and the hardware
   estimate before downloading, and then load it. Downloads resume after an interruption and
   multi-part models are fetched completely.
@@ -70,12 +79,12 @@ The ready-made packages live in `dist/`:
 
 | Platform | File | Status |
 |---|---|---|
-| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.5.1.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
-| Linux (x64) | `dist/ModelHarbor-1.5.1.AppImage` | built, start-tested (121 MB) |
+| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.6.0.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
+| Linux (x64) | `dist/ModelHarbor-1.6.0.AppImage` | built, start-tested (121 MB) |
 | macOS (Apple Silicon / Intel) | `ModelHarbor-1.2.2-arm64.dmg` / `-x64.dmg` | build with `npm run dist:mac` (on a Mac) |
 
 Both current packages are attached to the [GitHub release](https://github.com/Goitonthefloor/modelharbor/releases/latest)
-as `ModelHarbor-1.5.1.AppImage` and `ModelHarbor-Setup-1.5.1.exe`.
+as `ModelHarbor-1.6.0.AppImage` and `ModelHarbor-Setup-1.6.0.exe`.
 
 On first start the app walks you through the setup: check hardware, install a backend,
 pick a model.

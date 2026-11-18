@@ -425,6 +425,125 @@ with sync_playwright() as p:
           and any("3 Modelle" in x for x in src["toasts"]),
           json.dumps(src, ensure_ascii=False))
 
+    # Feature: modellspezifische Einstellungen mit K/V-Cache-Quantisierung
+    page.evaluate("setView('models'); setTab('local')")
+    page.wait_for_timeout(200)
+    ms = page.evaluate("""async () => {
+      window.__msStore = {};
+      window.__msCalls = [];
+      const ID = 'owner__model/model-Q4_K_M.gguf';
+      window.api.modelSettings = {
+        schema: async () => ({ cacheTypes: ['f16','bf16','f32','q8_0','q5_1','q5_0','q4_1','q4_0','iq4_nl'], defaultCache: 'f16', limits: {}, keys: [] }),
+        get: async (id) => ({ key: id, stored: window.__msStore[id] || {}, resolved: {}, summary: '' }),
+        set: async (id, patch) => {
+          window.__msCalls.push(['set', id, patch]);
+          // wie das echte Backend: leere Overrides entfernen den Eintrag
+          if (Object.keys(patch).length) window.__msStore[id] = patch; else delete window.__msStore[id];
+          return { key: id, stored: patch };
+        },
+        reset: async (id) => { window.__msCalls.push(['reset', id]); delete window.__msStore[id]; return { key: id, stored: {} }; },
+      };
+      window.api.models.local = async () => {
+        const st = window.__msStore[ID] || {};
+        return [{ id: ID, repo: 'owner/model', file: 'model-Q4_K_M.gguf', sizeLabel: '4.2 GB',
+          path: '/tmp/models/owner__model/model-Q4_K_M.gguf', quant: 'Q4_K_M', external: false,
+          kvBaseGB: 2.0, fitCtx: 8192, modelSettings: st,
+          settingsSummary: Object.keys(st).length ? 'K q4_0 · V q4_0 · FA' : '',
+          fit: { verdict: 'gpu', label: 'GPU', detail: 'passt', gpuLayers: 999 } }];
+      };
+      await refreshLocal();
+      const gear = document.querySelector('[data-act="model-settings"]');
+      if (!gear) return { error: 'kein Zahnrad-Button' };
+      gear.click();
+      await new Promise(r => setTimeout(r, 450));
+      const dlg = document.querySelector('#model-settings-dialog');
+      const kSel = document.querySelector('#ms-cacheTypeK');
+      const vSel = document.querySelector('#ms-cacheTypeV');
+      if (!kSel || !vSel) return { error: 'Cache-Auswahl fehlt', open: dlg.open };
+      const before = document.querySelector('#ms-kv').textContent;
+      kSel.value = 'q4_0'; kSel.dispatchEvent(new Event('change'));
+      vSel.value = 'q4_0'; vSel.dispatchEvent(new Event('change'));
+      const after = document.querySelector('#ms-kv').textContent;
+      const noteVisible = !document.querySelector('#ms-note').classList.contains('is-hidden');
+      const ctxEl = document.querySelector('#ms-ctx');
+      ctxEl.value = '16384'; ctxEl.dispatchEvent(new Event('input'));
+      const afterCtx = document.querySelector('#ms-kv').textContent;
+      // Kopf und Aktionen muessen ohne Scrollen sichtbar bleiben (nur Felder scrollen)
+      const dlgRect = dlg.getBoundingClientRect();
+      const saveRect = document.querySelector('#ms-save').getBoundingClientRect();
+      const fields = document.querySelector('#ms-fields');
+      return {
+        open: dlg.open,
+        saveVisible: saveRect.bottom <= dlgRect.bottom + 1 && saveRect.top >= dlgRect.top - 1
+                     && saveRect.bottom <= window.innerHeight,
+        fieldsScroll: fields.scrollHeight > fields.clientHeight,
+        bodyOverflow: getComputedStyle(document.querySelector('.ms-body')).overflow,
+        kOptions: [...kSel.options].map(o => o.value),
+        hasFields: ['ctx','gpuLayers','batchSize','ubatchSize','threads','mlock','noMmap','ropeFreqBase','ropeFreqScale','flashAttn']
+          .every(k => !!document.querySelector('[data-ms="' + k + '"]')),
+        before, after, afterCtx, noteVisible,
+      };
+    }""")
+    check("Modell-Einstellungen: Dialog mit K/V-Cache-Auswahl und allen Feldern",
+          ms.get("open") is True and ms.get("hasFields") is True
+          and ms.get("saveVisible") is True and ms.get("fieldsScroll") is True
+          and "" in ms.get("kOptions", []) and "q4_0" in ms.get("kOptions", [])
+          and "iq4_nl" in ms.get("kOptions", []) and len(ms.get("kOptions", [])) == 10,
+          json.dumps(ms, ensure_ascii=False))
+    check("KV-Anzeige reagiert live auf Quantisierung und Kontext",
+          ms.get("before") != ms.get("after") and "28 %" in (ms.get("after") or "")
+          and ms.get("noteVisible") is True and ms.get("after") != ms.get("afterCtx"),
+          json.dumps({k: ms.get(k) for k in ("before", "after", "afterCtx", "noteVisible")}, ensure_ascii=False))
+
+    save = page.evaluate("""async () => {
+      clearToasts();
+      document.querySelector('#ms-save').click();
+      await new Promise(r => setTimeout(r, 550));
+      const row = document.querySelector('#local-list .row');
+      return { closed: !document.querySelector('#model-settings-dialog').open,
+               calls: window.__msCalls,
+               badge: row ? row.textContent.includes('Eigene') : false,
+               toasts: [...document.querySelectorAll('#toast-wrap .toast-msg')].map(e => e.textContent) };
+    }""")
+    patch_sent = (save.get("calls") or [[None, None, {}]])[0]
+    check("Speichern: nur ausgefuellte Felder als Overrides, Badge erscheint",
+          save.get("closed") is True and patch_sent[0] == "set"
+          and patch_sent[2].get("cacheTypeK") == "q4_0" and patch_sent[2].get("cacheTypeV") == "q4_0"
+          and patch_sent[2].get("ctx") == 16384 and "batchSize" not in patch_sent[2]
+          and save.get("badge") is True and len(save.get("toasts", [])) >= 1,
+          json.dumps(save, ensure_ascii=False))
+
+    reset = page.evaluate("""async () => {
+      document.querySelector('[data-act="model-settings"]').click();
+      await new Promise(r => setTimeout(r, 450));
+      const k = document.querySelector('#ms-cacheTypeK').value;
+      const ctx = document.querySelector('#ms-ctx').value;
+      document.querySelector('#ms-reset').click();
+      await new Promise(r => setTimeout(r, 550));
+      const row = document.querySelector('#local-list .row');
+      return { k, ctx, calls: window.__msCalls.map(c => c[0]),
+               badge: row ? row.textContent.includes('Eigene') : false,
+               closed: !document.querySelector('#model-settings-dialog').open };
+    }""")
+    check("Zuruecksetzen: gespeicherte Werte werden geladen und dann entfernt",
+          reset.get("k") == "q4_0" and reset.get("ctx") == "16384"
+          and "reset" in reset.get("calls", []) and reset.get("badge") is False
+          and reset.get("closed") is True,
+          json.dumps(reset, ensure_ascii=False))
+
+    empty = page.evaluate("""async () => {
+      window.__msCalls = [];
+      document.querySelector('[data-act="model-settings"]').click();
+      await new Promise(r => setTimeout(r, 450));
+      document.querySelector('#ms-save').click();
+      await new Promise(r => setTimeout(r, 450));
+      return { calls: window.__msCalls, store: window.__msStore };
+    }""")
+    check("Leerer Dialog speichert keine Overrides (Standard bleibt)",
+          len(empty.get("calls", [])) == 1 and empty["calls"][0][2] == {}
+          and empty.get("store", {}) == {},
+          json.dumps(empty, ensure_ascii=False))
+
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))
 

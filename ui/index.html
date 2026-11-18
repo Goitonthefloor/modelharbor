@@ -51,6 +51,7 @@
             <span class="dot"></span>
             <span id="chat-model-name" data-i18n="chat.noModel">Kein Modell geladen</span>
           </div>
+          <button class="btn btn-ghost btn-sm is-hidden" id="btn-model-settings" data-act="model-settings-loaded" title="Modell-Einstellungen" aria-label="Modell-Einstellungen">⚙</button>
           <div class="topbar-spacer"></div>
           <label class="preset-wrap">
             <span class="preset-label" data-i18n="chat.preset">Preset</span>
@@ -188,7 +189,23 @@
       </form>
     </div>
   </dialog>
+  <dialog id="model-settings-dialog" aria-labelledby="ms-title">
+    <div class="dialog-body ms-body">
+      <h2 id="ms-title" data-i18n="ms.title">Modell-Einstellungen</h2>
+      <p class="ms-model" id="ms-model"></p>
+      <p class="ms-hint" id="ms-hint"></p>
+      <div id="ms-fields"></div>
+      <p class="ms-kv" id="ms-kv"></p>
+      <p class="ms-note is-hidden" id="ms-note"></p>
+      <form method="dialog" class="dialog-actions">
+        <button type="button" class="btn btn-danger-ghost" id="ms-reset" data-i18n="ms.reset">Auf Standard zurücksetzen</button>
+        <button type="submit" value="cancel" class="btn btn-ghost" data-i18n="common.cancel">Abbrechen</button>
+        <button type="button" class="btn btn-primary" id="ms-save" data-i18n="ms.save">Speichern</button>
+      </form>
+    </div>
+  </dialog>
   <script src="i18n.js"></script>
+  <script src="kvcache.js"></script>
   <script src="tokenspeed.js"></script>
   <script src="sse.js"></script>
   <script src="app.js"></script>

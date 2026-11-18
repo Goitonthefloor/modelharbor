@@ -2,6 +2,50 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.6.0] - 2026-11-18
+
+### Added
+
+- **Modellspezifische Einstellungen** (Zahnrad an jeder Modellzeile und am Chat-Header beim
+  geladenen Modell). Gespeichert wird pro Modell in `<userData>/model-settings.json`,
+  unabhängig von den globalen Einstellungen. Leere Felder = Standard, gesetzte Felder = Override.
+- **K- und V-Cache getrennt quantisierbar** — wie in LM Studio. Zur Auswahl stehen die von
+  llama.cpp unterstützten Typen `f16, bf16, f32, q8_0, q5_1, q5_0, q4_1, q4_0, iq4_nl`;
+  sie werden als `--cache-type-k` / `--cache-type-v` an den Server gegeben.
+- **Flash-Attention pro Modell** (Auto / An / Aus → `--flash-attn auto|on|off`).
+  Ein quantisierter V-Cache **erzwingt** Flash-Attention (llama.cpp-Vorgabe); der Dialog
+  weist sichtbar darauf hin, statt einen Startfehler zu produzieren.
+- **Live-Speicheranzeige im Dialog:** „KV-Cache bei N Tokens: ~X GB · Y % von f16“,
+  aktualisiert sich sofort bei Typ- und Kontextänderung.
+- **Die Fit-Bewertung berücksichtigt die Cache-Quantisierung.** q4_0/q4_0 braucht rund
+  28 % des f16-Caches — ein Modell kann dadurch von „zu groß“ auf „passt“ wechseln.
+- Weitere Werte pro Modell: **Kontextlänge, GPU-Layers, Batch-Größe, Micro-Batch,
+  CPU-Threads, mlock, mmap aus, RoPE-Frequenzbasis/-skalierung** (Nachkommastellen erlaubt).
+- Badge **„Eigene“** plus Kurzfassung (z. B. `K q4_0 · V q8_0 · FA · ctx 16384`) in der
+  Modellzeile; „Auf Standard zurücksetzen“ entfernt alle Overrides des Modells.
+- Vorrangregeln: **global < modellspezifisch < expliziter Aufruf**. Die Einstellungen
+  hängen am Modell, nicht am Ordner — auch Modelle aus Zusatzordnern behalten sie,
+  wenn sich die Ordnerreihenfolge ändert.
+
+### Changed
+
+- Neues Modul `electron/model-settings.js` (Schema, Validierung, Vorrang, Flags, Persistenz)
+  und `ui/kvcache.js` (Cache-Typen/Bytes/Faktor als **eine** Quelle für Backend und Renderer).
+- `server.buildArgs` nimmt die effektiven Werte entgegen; die alten gekoppelten
+  `cacheTypeKV`-Overrides sind entfernt (K und V sind jetzt getrennt).
+- `models.evaluateFit` rechnet den KV-Anteil mit dem Quantisierungsfaktor; neuer
+  Export `models.kvCacheGB` als f16-Basis für die UI-Anzeige.
+- Dialog-Layout: nur der Feldbereich scrollt, Kopf/KV-Anzeige/Aktionen bleiben sichtbar.
+- `npm test`: **130** Unit-Tests (vorher 108; +22 für Validierung, Vorrang, Cache-Faktoren,
+  Flags, Persistenz und die Verdrahtung in `buildArgs`/`evaluateFit`).
+  UI-Smoke **33/33** (+5 Checks: Dialogfelder, Live-KV-Anzeige, Speichern nur ausgefüllter
+  Felder, Zurücksetzen, leerer Dialog erzeugt keine Overrides).
+- Echt End-to-End gegen den laufenden Electron-Prozess geprüft (**15/15**): ein Schein-Backend
+  schreibt seine echte `argv` — die Kommandozeile enthält `--cache-type-k q4_0`,
+  `--cache-type-v q8_0`, `--flash-attn on`, `--ctx-size 16384`, `--n-gpu-layers 24`,
+  `--batch-size 512`, `--ubatch-size 128`, `--threads 6`, `--mlock`, `--no-mmap`,
+  `--rope-freq-base 500000`, `--rope-freq-scale 0.5`, ohne doppelte Flags.
+
 ## [1.5.1] - 2026-11-18
 
 ### Fixed

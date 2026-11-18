@@ -338,12 +338,19 @@ function estimateParamsBillions(fileName, sizeBytes) {
   return Math.max(0.1, size / bytesPerParam);
 }
 
-/** Speicherbedarf schätzen und gegen Hardware prüfen. */
-function evaluateFit(sizeBytes, fileName, hw, ctx) {
-  const fileGB = sizeBytes / 1073741824;
+/** KV-Cache-Bedarf in GB bei f16 (Basis für die Quantisierungsrechnung). */
+function kvCacheGB(sizeBytes, fileName, ctx) {
   const paramsB = estimateParamsBillions(fileName, sizeBytes);
+  return paramsB * 0.045 * ((ctx || 8192) / 4096);
+}
+
+/** Speicherbedarf schätzen und gegen Hardware prüfen. */
+function evaluateFit(sizeBytes, fileName, hw, ctx, kv = {}) {
+  const fileGB = sizeBytes / 1073741824;
   const context = ctx || 8192;
-  const kvGB = paramsB * 0.045 * (context / 4096);
+  // KV-Cache schrumpft mit der Quantisierung (K und V getrennt gewichtet).
+  const factor = require('./model-settings').kvFactor(kv.cacheTypeK, kv.cacheTypeV);
+  const kvGB = kvCacheGB(sizeBytes, fileName, context) * factor;
   const overheadGB = 0.6;
   const needGB = fileGB + kvGB + overheadGB;
 
@@ -819,7 +826,7 @@ async function deleteModel(modelsDir, modelId) {
 
 module.exports = {
   CATALOG, QUANT_BITS, HF,
-  searchModels, searchOnnxModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit,
+  searchModels, searchOnnxModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit, kvCacheGB,
   downloadModel, downloadOnnxModel, parseOnnxFiles, parseOnnxFolderFiles, onnxModelFiles,
   listLocal, deleteModel, quantFromName, quantBits, getJson, downloadFile,
   scanModelRoot, isExternalId,

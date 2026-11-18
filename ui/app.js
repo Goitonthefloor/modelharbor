@@ -462,6 +462,12 @@ function renderChatState() {
 
   chip.classList.toggle('is-live', !!state.server.running);
   chip.classList.toggle('is-loading', !!state.server.starting);
+  const msBtn = $('#btn-model-settings');
+  if (msBtn) {
+    msBtn.classList.toggle('is-hidden', !state.server.running);
+    msBtn.title = t('ms.title');
+    msBtn.setAttribute('aria-label', t('ms.title'));
+  }
   if (state.server.running) {
     name.textContent = monogram(state.server.model);
   } else if (state.server.starting) {
@@ -943,13 +949,14 @@ function renderLocal() {
   list.innerHTML = state.local.map((m) => `
     <div class="row">
       <div class="row-main">
-        <div class="row-title">${esc(m.repo)}${m.external ? ` <span class="badge badge-neutral" title="${esc(t('models.externalTitle'))}">${esc(t('models.externalBadge'))}</span>` : ''}</div>
-        <div class="row-sub">${esc(m.file)} · ${esc(m.sizeLabel)}${m.quant ? ' · ' + esc(m.quant) : ''}${m.external && m.sourceDir ? ' · ' + esc(t('models.fromFolder', { dir: m.sourceDir })) : ''}</div>
+        <div class="row-title">${esc(m.repo)}${m.external ? ` <span class="badge badge-neutral" title="${esc(t('models.externalTitle'))}">${esc(t('models.externalBadge'))}</span>` : ''}${m.settingsSummary ? ` <span class="badge badge-custom" title="${esc(t('ms.badgeTitle', { summary: m.settingsSummary }))}">${esc(t('ms.custom'))}</span>` : ''}</div>
+        <div class="row-sub">${esc(m.file)} · ${esc(m.sizeLabel)}${m.quant ? ' · ' + esc(m.quant) : ''}${m.settingsSummary ? ' · ' + esc(m.settingsSummary) : ''}${m.external && m.sourceDir ? ' · ' + esc(t('models.fromFolder', { dir: m.sourceDir })) : ''}</div>
         <div class="fit-note" style="margin-top:4px">${esc(fitDetail(m.fit))}</div>
       </div>
       <div class="row-actions">
         ${fitBadge(m.fit)}
         <button class="btn btn-primary btn-sm" data-act="load-local" data-id="${esc(m.id)}">${esc(t('models.load'))}</button>
+        <button class="btn btn-ghost btn-sm" data-act="model-settings" data-id="${esc(m.id)}" title="${esc(t('ms.title'))}" aria-label="${esc(t('ms.title'))}">⚙</button>
         <button class="btn btn-ghost btn-sm" data-act="reveal" data-path="${esc(m.path)}" title="${esc(t('models.revealTitle'))}">${esc(t('models.folder'))}</button>
         ${m.external ? '' : `<button class="btn btn-danger-ghost btn-sm" data-act="delete-local" data-id="${esc(m.id)}">${esc(t('common.delete'))}</button>`}
       </div>
@@ -972,6 +979,155 @@ async function refreshModelSources() {
   } catch {
     state.modelSources = [];
   }
+}
+
+/* ------------------- Modellspezifische Einstellungen ------------------- */
+
+const MS_NUM_FIELDS = [
+  { key: 'ctx', label: 'ms.ctx', hint: 'ms.ctxHint', min: 512, max: 1048576, step: 512 },
+  { key: 'gpuLayers', label: 'ms.gpuLayers', hint: 'ms.gpuLayersHint', min: 0, max: 999, step: 1 },
+  { key: 'batchSize', label: 'ms.batchSize', min: 32, max: 8192, step: 32, adv: true },
+  { key: 'ubatchSize', label: 'ms.ubatchSize', min: 16, max: 8192, step: 16, adv: true },
+  { key: 'threads', label: 'ms.threads', min: 1, max: 256, step: 1, adv: true },
+  { key: 'ropeFreqBase', label: 'ms.ropeFreqBase', min: 0, max: 10000000, step: 1000, adv: true },
+  { key: 'ropeFreqScale', label: 'ms.ropeFreqScale', min: 0, max: 128, step: 0.125, adv: true },
+];
+const MS_BOOL_FIELDS = [
+  { key: 'mlock', label: 'ms.mlock', adv: true },
+  { key: 'noMmap', label: 'ms.noMmap', adv: true },
+];
+
+let msModel = null;
+let msSchema = null;
+
+/** Nur ausgefüllte Felder werden zu Overrides — leere Felder = Standard. */
+function collectMsPatch() {
+  const patch = {};
+  for (const el of $$('#ms-fields [data-ms]')) {
+    const key = el.dataset.ms;
+    if (el.type === 'checkbox') { if (el.checked) patch[key] = true; continue; }
+    const raw = el.value;
+    if (raw === '' || raw === null || raw === undefined) continue;
+    if (key === 'flashAttn') { patch.flashAttn = raw === 'on'; continue; }
+    if (key === 'cacheTypeK' || key === 'cacheTypeV') { patch[key] = raw; continue; }
+    const n = Number(raw);
+    if (Number.isFinite(n)) patch[key] = n;
+  }
+  return patch;
+}
+
+function updateMsPreview() {
+  const kv = window.KVCACHE;
+  if (!kv || !msModel) return;
+  const patch = collectMsPatch();
+  const k = patch.cacheTypeK || kv.DEFAULT_CACHE;
+  const v = patch.cacheTypeV || kv.DEFAULT_CACHE;
+  const baseCtx = msModel.fitCtx || state.settings?.ctx || 8192;
+  const ctx = patch.ctx !== undefined ? patch.ctx : baseCtx;
+  const gb = kv.kvEstimateGB(msModel.kvBaseGB || 0, baseCtx, ctx, k, v);
+  $('#ms-kv').textContent = t('ms.kvEstimate', { ctx, gb: gb.toFixed(2), pct: Math.round(kv.kvFactor(k, v) * 100) });
+  const note = $('#ms-note');
+  // Quantisierter V-Cache braucht Flash-Attention — das Backend erzwingt es.
+  if (kv.isQuantized(v)) { note.textContent = t('ms.vNeedsFa'); note.classList.remove('is-hidden'); }
+  else { note.textContent = ''; note.classList.add('is-hidden'); }
+}
+
+function renderModelSettings(info) {
+  const kv = window.KVCACHE;
+  const stored = (info && info.stored) || {};
+  const types = (msSchema && msSchema.cacheTypes) || kv.CACHE_TYPES;
+  $('#ms-model').textContent = `${msModel.repo || ''} · ${msModel.file || basename(msModel.path || '')}`;
+  const isLoaded = state.server.running && state.server.model === msModel.path;
+  $('#ms-hint').textContent = t(isLoaded ? 'ms.hintLoaded' : 'ms.hint');
+
+  const cacheOptions = (selected) => `<option value="">${esc(t('ms.default'))} (f16)</option>`
+    + types.map((c) => `<option value="${esc(c)}"${c === selected ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  const faVal = stored.flashAttn === true ? 'on' : stored.flashAttn === false ? 'off' : '';
+  const num = (f) => `<div class="ms-row">
+      <label for="ms-${f.key}">${esc(t(f.label))}${f.hint ? `<span>${esc(t(f.hint))}</span>` : ''}</label>
+      <input type="number" class="num-input" id="ms-${f.key}" data-ms="${f.key}" min="${f.min}" max="${f.max}" step="${f.step}"
+        value="${stored[f.key] !== undefined ? esc(stored[f.key]) : ''}" placeholder="${esc(t('ms.default'))}">
+    </div>`;
+  const bool = (f) => `<div class="ms-row">
+      <label for="ms-${f.key}">${esc(t(f.label))}</label>
+      <input type="checkbox" id="ms-${f.key}" data-ms="${f.key}"${stored[f.key] ? ' checked' : ''}>
+    </div>`;
+
+  $('#ms-fields').innerHTML = `
+    <div class="ms-section">${esc(t('ms.cacheSection'))}</div>
+    <p class="ms-section-hint">${esc(t('ms.cacheHint'))}</p>
+    <div class="ms-row">
+      <label for="ms-cacheTypeK">${esc(t('ms.cacheK'))}</label>
+      <select id="ms-cacheTypeK" data-ms="cacheTypeK">${cacheOptions(stored.cacheTypeK)}</select>
+    </div>
+    <div class="ms-row">
+      <label for="ms-cacheTypeV">${esc(t('ms.cacheV'))}</label>
+      <select id="ms-cacheTypeV" data-ms="cacheTypeV">${cacheOptions(stored.cacheTypeV)}</select>
+    </div>
+    <div class="ms-row">
+      <label for="ms-flashAttn">${esc(t('ms.flashAttn'))}<span>${esc(t('ms.flashAttnHint'))}</span></label>
+      <select id="ms-flashAttn" data-ms="flashAttn">
+        <option value=""${faVal === '' ? ' selected' : ''}>${esc(t('ms.auto'))}</option>
+        <option value="on"${faVal === 'on' ? ' selected' : ''}>${esc(t('ms.on'))}</option>
+        <option value="off"${faVal === 'off' ? ' selected' : ''}>${esc(t('ms.off'))}</option>
+      </select>
+    </div>
+    ${MS_NUM_FIELDS.filter((f) => !f.adv).map(num).join('')}
+    <div class="ms-section">${esc(t('ms.advanced'))}</div>
+    ${MS_NUM_FIELDS.filter((f) => f.adv).map(num).join('')}
+    ${MS_BOOL_FIELDS.map(bool).join('')}`;
+
+  for (const el of $$('#ms-fields [data-ms]')) {
+    el.addEventListener('input', updateMsPreview);
+    el.addEventListener('change', updateMsPreview);
+  }
+  updateMsPreview();
+}
+
+async function openModelSettings(model) {
+  if (!model || !model.id) { toast(t('toast.noModelPath'), 'error'); return; }
+  msModel = model;
+  try {
+    if (!msSchema) msSchema = await bridge.modelSettings.schema();
+    const info = await bridge.modelSettings.get(model.id);
+    renderModelSettings(info);
+    $('#model-settings-dialog').showModal();
+  } catch (err) { toast(err.message, 'error', 8000); }
+}
+
+async function saveModelSettings() {
+  if (!msModel) return;
+  try {
+    const patch = collectMsPatch();
+    await bridge.modelSettings.set(msModel.id, patch);
+    const isLoaded = state.server.running && state.server.model === msModel.path;
+    toast(t(isLoaded ? 'ms.savedLoaded' : 'ms.saved'), 'ok', 6000);
+    $('#model-settings-dialog').close();
+    await refreshLocal();
+  } catch (err) { toast(err.message, 'error', 8000); }
+}
+
+async function resetModelSettings() {
+  if (!msModel) return;
+  try {
+    await bridge.modelSettings.reset(msModel.id);
+    toast(t('ms.resetDone'), 'ok', 5000);
+    $('#model-settings-dialog').close();
+    await refreshLocal();
+  } catch (err) { toast(err.message, 'error', 8000); }
+}
+
+/** Zahnrad am Chat-Header: Einstellungen des gerade geladenen Modells. */
+async function openLoadedModelSettings() {
+  const path = state.server.model || (state.server.lastModel && state.server.lastModel.path);
+  if (!path) return;
+  let m = state.local.find((x) => x.path === path);
+  if (!m) { await refreshLocal(); m = state.local.find((x) => x.path === path); }
+  if (!m) {
+    const lm = state.server.lastModel || {};
+    m = { id: lm.id || path, path, repo: basename(path), file: basename(path), fit: lm.fit || null };
+  }
+  await openModelSettings(m);
 }
 
 /* --------------------------- Setup --------------------------- */
@@ -1152,6 +1308,8 @@ function bindEvents() {
     }
   });
   $('#update-now').addEventListener('click', startUpdateDownload);
+  $('#ms-save').addEventListener('click', saveModelSettings);
+  $('#ms-reset').addEventListener('click', resetModelSettings);
   $('#update-dialog').addEventListener('close', () => {
     const val = $('#update-dialog').returnValue;
     $('#update-dialog').returnValue = '';
@@ -1338,6 +1496,11 @@ function bindEvents() {
         toast(t('toast.modelsDirChanged'), 'ok');
       } catch (err) { toast(err.message, 'error', 7000); }
     }
+    if (act === 'model-settings') {
+      const m = state.local.find((x) => x.id === btn.dataset.id);
+      if (m) await openModelSettings(m);
+    }
+    if (act === 'model-settings-loaded') { await openLoadedModelSettings(); }
     if (act === 'open-models') { ipc(bridge.shell.showModels()); }
     if (act === 'add-source') {
       try {

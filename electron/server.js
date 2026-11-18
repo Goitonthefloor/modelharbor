@@ -84,27 +84,28 @@ async function waitForHealth(port, { timeoutMs = 180000, onTick } = {}) {
   throw new Error(i18n.t('error.modelLoadFailed', { status: lastStatus, tail }));
 }
 
-function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLayers, threads, port, hw }) {
+function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLayers, threads, port, hw, resolved = null }) {
   const preset = getPreset(presetId);
   const sampling = { ...preset.sampling, ...(overrides.sampling || {}) };
+  const ms = require('./model-settings');
+  // Effektive Werte: global < modellspezifisch < expliziter Aufruf.
+  const r = resolved || ms.resolve({ global: { ctx, gpuLayers, threads }, call: overrides });
   const args = [
     '--model', modelPath,
     '--alias', overrides.alias || 'ModelHarbor',
     '--host', '127.0.0.1',
     '--port', String(port),
-    '--ctx-size', String(ctx || overrides.ctx || 8192),
-    '--n-gpu-layers', String(gpuLayers === undefined ? 'all' : gpuLayers),
+    '--ctx-size', String(r.ctx),
+    '--n-gpu-layers', String(r.gpuLayers === undefined ? 'all' : r.gpuLayers),
     '--fit', 'on',
     '--jinja',
     '--no-perf',
   ];
   const cpuCount = (require('os').cpus() || []).length || 4;
-  const t = threads || overrides.threads || Math.max(2, cpuCount - 1);
+  const t = r.threads || Math.max(2, cpuCount - 1);
   args.push('--threads', String(t));
-  if (overrides.flashAttn !== false) args.push('--flash-attn', 'auto');
-  if (overrides.cacheTypeKV) {
-    args.push('--cache-type-k', overrides.cacheTypeKV, '--cache-type-v', overrides.cacheTypeKV);
-  }
+  // Flash-Attention + getrennte K/V-Cache-Quantisierung, Batch, mlock/mmap, RoPE
+  args.push(...ms.llamaArgs(r));
   // mmproj automatisch, wenn neben dem Modell vorhanden
   try {
     const dir = path.dirname(modelPath);
@@ -126,9 +127,10 @@ async function startServer(opts) {
   if (!fs.existsSync(modelPath)) throw new Error(i18n.t('error.modelFileMissing', { path: modelPath }));
 
   const port = opts.port || await freePort(9931);
-  const ctx = overrides.ctx || 8192;
-  const gpuLayers = overrides.gpuLayers !== undefined ? overrides.gpuLayers : 999;
-  const { args: _b, preset, sampling } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw });
+  const ctx = (opts.resolved && opts.resolved.ctx) || overrides.ctx || 8192;
+  const gpuLayers = opts.resolved ? opts.resolved.gpuLayers
+    : (overrides.gpuLayers !== undefined ? overrides.gpuLayers : 999);
+  const { args: _b, preset, sampling } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw, resolved: opts.resolved || null });
 
   // ONNX-Modellordner (GenAI): statt llama-server den OGA-Chat-Server starten.
   // Erkennung: Modellpfad ist ein Verzeichnis mit genai_config.json.

@@ -11,6 +11,7 @@ const server = require('./server');
 const updater = require('./updater');
 const logger = require('./logger');
 const { childPath, withinRoot, withinAnyRoot } = require('./paths');
+const ms = require('./model-settings');
 const { PRESETS } = require('./presets');
 const i18n = require('../ui/i18n');
 
@@ -75,6 +76,29 @@ async function saveSettings(patch) {
   await fsp.writeFile(file, JSON.stringify(settings, null, 2), 'utf8');
   logger.configure({ debug: settings.debugLog, dir: userDataDir() });
   return settings;
+}
+
+/* ------------------- Modellspezifische Einstellungen ------------------- */
+
+let modelSettingsStore = {};
+function modelSettingsFile() { return path.join(userDataDir(), 'model-settings.json'); }
+
+/** Effektive Werte für ein Modell: global < modellspezifisch < Aufruf-Overrides. */
+function resolveModelSettings(modelId, call = {}) {
+  const key = ms.modelKey(modelId);
+  return ms.resolve({
+    global: { ctx: settings.ctx, gpuLayers: settings.gpuLayers },
+    model: modelSettingsStore[key] || {},
+    call,
+  });
+}
+
+async function saveModelSettings(key, patch) {
+  const clean = ms.normalize(patch);
+  if (Object.keys(clean).length) modelSettingsStore[key] = clean;
+  else delete modelSettingsStore[key];
+  await ms.writeStore(modelSettingsFile(), modelSettingsStore);
+  return modelSettingsStore[key] || {};
 }
 
 /* --------------------------- Fenster --------------------------- */
@@ -238,7 +262,50 @@ function registerIpc() {
   ipcMain.handle('models:local', async () => {
     const hw = await scanHardwareCached();
     const list = await models.listLocal(settings.modelsDir, settings.extraModelDirs);
-    return list.map((m) => ({ ...m, fit: models.evaluateFit(m.sizeBytes, m.file, hw, settings.ctx || 8192) }));
+    return list.map((m) => {
+      const key = ms.modelKey(m.id);
+      const stored = modelSettingsStore[key] || {};
+      const r = resolveModelSettings(m.id);
+      return {
+        ...m,
+        fit: models.evaluateFit(m.sizeBytes, m.file, hw, r.ctx, { cacheTypeK: r.cacheTypeK, cacheTypeV: r.cacheTypeV }),
+        kvBaseGB: models.kvCacheGB(m.sizeBytes, m.file, r.ctx),
+        fitCtx: r.ctx,
+        modelSettings: stored,
+        settingsSummary: Object.keys(stored).length ? ms.summary(r) : '',
+      };
+    });
+  });
+
+  /* ------------------- Modellspezifische Einstellungen ------------------- */
+
+  ipcMain.handle('modelSettings:schema', async () => ({
+    cacheTypes: ms.CACHE_TYPES,
+    defaultCache: ms.DEFAULT_CACHE,
+    limits: ms.LIMITS,
+    keys: ms.ALL_KEYS,
+  }));
+
+  ipcMain.handle('modelSettings:get', async (_e, modelId) => {
+    const key = ms.modelKey(modelId);
+    const stored = modelSettingsStore[key] || {};
+    const resolved = resolveModelSettings(modelId);
+    return { key, stored, resolved, summary: ms.summary(resolved) };
+  });
+
+  ipcMain.handle('modelSettings:set', async (_e, modelId, patch) => {
+    const key = ms.modelKey(modelId);
+    if (!key) throw new Error(i18n.t('error.invalidPath'));
+    const stored = await saveModelSettings(key, patch);
+    const resolved = resolveModelSettings(modelId);
+    return { key, stored, resolved, summary: ms.summary(resolved) };
+  });
+
+  ipcMain.handle('modelSettings:reset', async (_e, modelId) => {
+    const key = ms.modelKey(modelId);
+    delete modelSettingsStore[key];
+    await ms.writeStore(modelSettingsFile(), modelSettingsStore);
+    return { key, stored: {}, resolved: resolveModelSettings(modelId) };
   });
 
   ipcMain.handle('models:delete', async (_e, id) => {
@@ -299,16 +366,29 @@ function registerIpc() {
     } catch {
       throw new Error(i18n.t('error.modelPathOutside'));
     }
+    // ctx/gpuLayers aus dem Renderer sind die globalen Werte (bzw. die
+    // Fit-Empfehlung) — sie bilden die BASIS. Modellspezifische Einstellungen
+    // haben Vorrang, explizite Overrides im Aufruf nochmal darüber.
+    const callOverrides = { ...(opts.overrides || {}) };
+    const resolved = ms.resolve({
+      global: {
+        ctx: opts.ctx || settings.ctx,
+        gpuLayers: opts.gpuLayers !== undefined ? opts.gpuLayers : settings.gpuLayers,
+      },
+      model: modelSettingsStore[ms.modelKey(opts.modelId || modelPath)] || {},
+      call: callOverrides,
+    });
     const result = await server.startServer({
       serverPath: backend.serverPath,
       modelPath,
       presetId: opts.preset || settings.lastPreset || 'balanced',
       onnxPython: backend && backend.id === 'onnx' ? backend.serverPath : undefined,
-      overrides: { ...(opts.overrides || {}), ctx: opts.ctx || settings.ctx, gpuLayers: opts.gpuLayers !== undefined ? opts.gpuLayers : settings.gpuLayers },
+      overrides: callOverrides,
+      resolved,
       hw: hwCache,
     });
     await saveSettings({ lastPreset: result.preset, lastModelId: opts.modelId || null });
-    return { ...result, backend: backend.id };
+    return { ...result, backend: backend.id, settings: resolved };
   });
 
   ipcMain.handle('server:stop', async () => server.stopServer());
@@ -377,9 +457,10 @@ if (!gotLock) {
     if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     app.setAppUserModelId('com.modelharbor.app');
     loadSettings();
+    modelSettingsStore = await ms.readStore(modelSettingsFile());
     // Nach einem Absturz können llama-server-Prozesse liegenbleiben
     server.cleanupOrphans(settings.backendsDir).catch(() => {});
     registerIpc();
