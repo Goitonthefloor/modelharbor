@@ -106,6 +106,13 @@ function estimateVramFromName(name) {
   if (/laptop|mobile|max-?q|notebook/i.test(n)) return null;
   // integrierte Grafik (kein eigener VRAM)
   if (/radeon\s*graphics|vega\s*\d+\s*graphics|intel\s*(hd|uhd|iris)|apple\s*m\d/i.test(n)) return null;
+  // Explizite Größenangabe im Namen schlägt die Tabelle: sonst wird z. B. die
+  // 16-GB-Variante der RTX 4060 Ti als 8 GB geschätzt.
+  const explicit = n.match(/\b(\d{1,2})\s*GB\b/i);
+  if (explicit) {
+    const gb = Number(explicit[1]);
+    if (gb >= 2 && gb <= 96) return gb * 1024 * 1024 * 1024;
+  }
   for (const [re, gb] of VRAM_NAME_MAP) {
     if (re.test(n)) return gb * 1024 * 1024 * 1024;
   }
@@ -149,6 +156,18 @@ function parseNumber(s) {
 
 function readFileSafe(p) {
   try { return fs.readFileSync(p, 'utf8').trim(); } catch { return null; }
+}
+
+/**
+ * Gehört ein sysfs-Gerätepfad zur lspci-Adresse? sysfs liefert die Adresse mit
+ * Domain ("0000:03:00.0"), lspci meist ohne ("03:00.0"). Reine Funktion, testbar.
+ */
+function pciAddressMatches(devicePath, lspciAddress) {
+  const addr = String(lspciAddress || '').toLowerCase().trim();
+  if (!addr) return false;
+  const base = path.basename(String(devicePath || '').toLowerCase());
+  const short = base.replace(/^[0-9a-f]{4}:/, '');
+  return short === addr || base === addr;
 }
 
 async function detectLinux() {
@@ -214,15 +233,19 @@ async function detectLinux() {
         continue;
       }
 
-      // AMD VRAM aus sysfs (amdgpu)
+      // VRAM aus sysfs (amdgpu). Die Karte muss zur PCI-Adresse passen:
+      // über den Vendor allein bekommt eine dGPU den VRAM der iGPU (gleicher
+      // Vendor, z. B. APU + Radeon-Karte) — das verfälscht das Modell-Budget.
       let vramBytes = null;
       try {
         const cards = fs.readdirSync('/sys/class/drm').filter((c) => /^card\d+$/.test(c));
         for (const card of cards) {
-          const vendor = readFileSafe(`/sys/class/drm/${card}/device/vendor`);
-          if (!vendor || !vendor.toLowerCase().includes(vendorId)) continue;
+          let devPath = '';
+          try { devPath = fs.realpathSync(`/sys/class/drm/${card}/device`); } catch { continue; }
+          if (!pciAddressMatches(devPath, m[1])) continue;
           const total = readFileSafe(`/sys/class/drm/${card}/device/mem_info_vram_total`);
-          if (total) { vramBytes = parseInt(total, 10); break; }
+          if (total) vramBytes = parseInt(total, 10);
+          break;
         }
       } catch { /* sysfs nicht lesbar */ }
 
@@ -634,4 +657,4 @@ async function scanHardware() {
   return hw;
 }
 
-module.exports = { scanHardware, recommendBackend, isIntegrated, formatBytes, run, estimateVramFromName, pickRegistryVram };
+module.exports = { scanHardware, recommendBackend, isIntegrated, formatBytes, run, estimateVramFromName, pickRegistryVram, pciAddressMatches };

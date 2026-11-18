@@ -631,32 +631,31 @@ async function runCompletion() {
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
+    const handle = (json) => {
+      if (json.usage) usage = json.usage;
+      const ch = json.choices && json.choices[0];
+      const d = ch && ch.delta ? ch.delta : {};
+      // Denk-Modelle (Qwen3, R1-Distill) liefern zusätzlich reasoning_content
+      if (d.reasoning_content || d.content) {
+        const now = performance.now();
+        if (!tFirstToken) tFirstToken = now;
+        tLastToken = now;
+      }
+      if (d.reasoning_content) { reasoning += d.reasoning_content; paint(false); }
+      if (d.content) { full += d.content; paint(false); }
+    };
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line.startsWith('data:')) continue;
-        const data = line.slice(5).trim();
-        if (!data || data === '[DONE]') continue;
-        let json;
-        try { json = JSON.parse(data); } catch { continue; }
-        if (json.usage) usage = json.usage;
-        const ch = json.choices && json.choices[0];
-        const d = ch && ch.delta ? ch.delta : {};
-        // Denk-Modelle (Qwen3, R1-Distill) liefern zusätzlich reasoning_content
-        if (d.reasoning_content || d.content) {
-          const now = performance.now();
-          if (!tFirstToken) tFirstToken = now;
-          tLastToken = now;
-        }
-        if (d.reasoning_content) { reasoning += d.reasoning_content; paint(false); }
-        if (d.content) { full += d.content; paint(false); }
-      }
+      const parsed = parseSseChunk(buf);
+      buf = parsed.rest;
+      for (const json of parsed.payloads) handle(json);
     }
+    // Stream-Ende: Decoder flushen und die letzte Zeile auch ohne abschließendes
+    // Newline auswerten — sonst geht das letzte Delta (oft der Usage-Block) verloren.
+    buf += dec.decode();
+    for (const json of parseSseChunk(buf, true).payloads) handle(json);
     paint(true);
     state.chat.messages.push({ role: 'assistant', content: full, reasoning: reasoning || null });
     body.innerHTML = (reasoning ? reasoningBlock(reasoning) : '') + renderMarkdown(full);

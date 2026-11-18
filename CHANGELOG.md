@@ -2,6 +2,46 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.4.4] - 2026-11-18
+
+### Fixed
+
+- **Chat-Stream: das letzte Delta ging verloren.** Die SSE-Schleife verarbeitete
+  nur Zeilen mit abschließendem Newline. Endet der Stream ohne Newline (beim
+  letzten `data:`-Block üblich), wurde die Zeile verworfen — betroffen war oft der
+  Usage-Block (Token-Anzeige/tok/s blieb leer) oder das letzte Textstück. Neues
+  `ui/sse.js` (`parseSseChunk`) wertet am Stream-Ende den Restpuffer aus und
+  flusht den TextDecoder.
+- **Update-Download konnte die App crashen.** `updater.downloadFile` schrieb ohne
+  `error`-Handler auf den Datei-Stream; ein Schreibfehler (EISDIR, ENOSPC, EACCES)
+  war ein unbehandeltes `error`-Event und beendete den Prozess. Jetzt `pipeline()`:
+  Fehler jeder Stream-Stufe werden abgefangen, die Teildatei wird entfernt.
+- **Update-Download hatte keinen Timeout.** Ein hängender Server ließ den Download
+  endlos laufen. Neu: Inaktivitäts-Timeout (60 s ohne Daten, per Option änderbar).
+- **Update-Dateiname aus dem Renderer erlaubte Pfad-Ausbruch.** `update:download`
+  baute das Ziel per `path.join(userData, 'downloads', name)`; ein Name wie
+  `../../../../tmp/boese.exe` schrieb außerhalb des Download-Ordners. Neues
+  `electron/paths.js` (`childPath`) verwirft Verzeichnisteile und lehnt `..`/`.` ab.
+- **`update:openFile` und `models:reveal` öffneten beliebige Pfade.** Beide prüfen
+  den Pfad jetzt per `withinRoot()` gegen den Download- bzw. Modellordner.
+- **Linux: VRAM wurde der falschen GPU zugeordnet.** Die sysfs-Suche matchte nur
+  den Vendor — bei APU + diskreter Radeon-Karte bekam die dGPU den VRAM der iGPU
+  und damit ein falsches Modell-Budget. Jetzt wird die PCI-Adresse der Karte mit
+  dem lspci-Eintrag abgeglichen (`pciAddressMatches`).
+- **VRAM-Schätzung ignorierte explizite Größenangaben.** „RTX 4060 Ti 16GB“ wurde
+  als 8 GB geschätzt. Eine GB-Angabe im Gerätenamen hat jetzt Vorrang vor der
+  Modell-Tabelle (Laptop-/iGPU-Ablehnung bleibt bestehen).
+- **Debug-Log rotierte nur beim App-Start.** In langen Sitzungen wuchs die Datei
+  unbegrenzt; die Rotation läuft jetzt auch während der Betriebzeit (150-KB-Limit).
+
+### Changed
+
+- `npm test`: **88** Unit-Tests (vorher 73; +15 für SSE-Restpuffer, Update-Download
+  inkl. Schreibfehler/Timeout, Pfad-Guards, Log-Rotation und VRAM-Zuordnung).
+  UI-Smoke **23/23**.
+- Neue Module: `ui/sse.js` (SSE-Parsing, in Node testbar) und `electron/paths.js`
+  (Pfad-Guards für Renderer-Werte).
+
 ## [1.4.3] - 2026-11-18
 
 ### Fixed

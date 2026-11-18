@@ -1,0 +1,47 @@
+'use strict';
+/**
+ * paths.js — Pfad-Guards für Werte, die aus dem Renderer kommen.
+ *
+ * Der Renderer ist nicht vertrauenswürdig (XSS, manipulierte API-Antworten).
+ * Diese Helfer stellen sicher, dass Dateioperationen im vorgesehenen
+ * Verzeichnis bleiben. Reine Funktionen, damit in Node testbar.
+ */
+const path = require('path');
+const i18n = require('../ui/i18n');
+
+/** Liegt `candidate` innerhalb von `root` (echter Präfix, nicht nur String)? */
+function isWithin(root, candidate) {
+  const r = path.resolve(root);
+  const c = path.resolve(candidate);
+  return c === r || c.startsWith(r + path.sep);
+}
+
+/**
+ * Baut einen Kindpfad aus einem unvertrauenswürdigen NAMEN.
+ * Verzeichnisteile werden verworfen (basename), '.'/'..'/leer abgelehnt.
+ * @returns {string} absoluter Pfad innerhalb von root
+ */
+function childPath(root, name) {
+  const base = path.basename(String(name == null ? '' : name).replace(/\\/g, '/'));
+  if (!base || base === '.' || base === '..') {
+    throw new Error(i18n.t('error.invalidPath'));
+  }
+  const target = path.resolve(root, base);
+  if (!isWithin(root, target)) throw new Error(i18n.t('error.invalidPath'));
+  return target;
+}
+
+/**
+ * Prüft einen unvertrauenswürdigen PFAD (darunter verschachtelte Pfade) gegen root.
+ * @returns {string} aufgelöster Pfad, wenn er innerhalb von root liegt
+ */
+function withinRoot(root, candidate) {
+  if (candidate == null || String(candidate).trim() === '') {
+    throw new Error(i18n.t('error.invalidPath'));
+  }
+  const target = path.resolve(String(candidate));
+  if (!isWithin(root, target)) throw new Error(i18n.t('error.invalidPath'));
+  return target;
+}
+
+module.exports = { isWithin, childPath, withinRoot };

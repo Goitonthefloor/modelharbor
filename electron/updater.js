@@ -6,6 +6,8 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const { Readable, Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const i18n = require('../ui/i18n');
 
 const DEFAULT_REPO = 'Goitonthefloor/modelharbor';
@@ -95,23 +97,25 @@ async function checkForUpdate({ currentVersion, repo = DEFAULT_REPO, platform = 
 
 /* --------------------------- Download mit Fortschritt --------------------------- */
 
-async function downloadFile(url, destPath, onProgress = () => {}) {
+async function downloadFile(url, destPath, onProgress = () => {}, { timeoutMs = 60000 } = {}) {
   if (!/^https?:\/\//i.test(url)) throw new Error(i18n.t('error.invalidDownloadUrl'));
   await fsp.mkdir(path.dirname(destPath), { recursive: true });
-  const res = await fetch(url, { headers: { 'User-Agent': 'ModelHarbor' } });
-  if (!res.ok || !res.body) throw new Error(i18n.t('error.updateDownloadFailed', { status: res.status }));
-  const total = Number(res.headers.get('content-length')) || 0;
-  let done = 0;
-  let lastEmit = 0;
-  const reader = res.body.getReader();
-  const out = fs.createWriteStream(destPath);
+  // Inaktivitäts-Timeout: bricht nur ab, wenn keine Daten mehr fließen
+  // (ein Gesamt-Timeout würde große Installer mitten im Download abbrechen).
+  const ctrl = new AbortController();
+  let timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const bump = () => { clearTimeout(timer); timer = setTimeout(() => ctrl.abort(), timeoutMs); };
+  let wrote = false;
   try {
-    while (true) {
-      const { done: finished, value } = await reader.read();
-      if (finished) break;
-      if (value && value.length) {
-        done += value.length;
-        if (!out.write(value)) await new Promise((r) => out.once('drain', r));
+    const res = await fetch(url, { headers: { 'User-Agent': 'ModelHarbor' }, signal: ctrl.signal });
+    if (!res.ok || !res.body) throw new Error(i18n.t('error.updateDownloadFailed', { status: res.status }));
+    const total = Number(res.headers.get('content-length')) || 0;
+    let done = 0;
+    let lastEmit = 0;
+    const counter = new Transform({
+      transform(chunk, _enc, cb) {
+        bump();
+        done += chunk.length;
         const now = Date.now();
         if (now - lastEmit > 150 || done === total) {
           lastEmit = now;
@@ -122,17 +126,22 @@ async function downloadFile(url, destPath, onProgress = () => {}) {
             totalBytes: total,
           });
         }
-      }
-    }
-    out.end();
-    await new Promise((r) => out.once('finish', r));
+        cb(null, chunk);
+      },
+    });
+    // pipeline behandelt Fehler jeder Stream-Stufe (z. B. EISDIR/ENOSPC beim
+    // Schreiben) und zerstört die Streams — sonst crasht ein 'error'-Event die App.
+    const out = fs.createWriteStream(destPath);
+    wrote = true;
+    await pipeline(Readable.fromWeb(res.body), counter, out);
+    onProgress({ phase: 'done', percent: 100, doneBytes: done, totalBytes: total });
+    return { destPath, size: done };
   } catch (e) {
-    out.destroy();
-    try { await fsp.unlink(destPath); } catch { /* ignore */ }
+    if (wrote) { try { await fsp.unlink(destPath); } catch { /* ignore */ } }
     throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  onProgress({ phase: 'done', percent: 100, doneBytes: done, totalBytes: total });
-  return { destPath, size: done };
 }
 
 module.exports = { parseVersion, isNewerVersion, pickAsset, fetchLatestRelease, checkForUpdate, downloadFile, DEFAULT_REPO };

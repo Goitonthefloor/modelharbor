@@ -10,6 +10,7 @@ const models = require('./models');
 const server = require('./server');
 const updater = require('./updater');
 const logger = require('./logger');
+const { childPath, withinRoot } = require('./paths');
 const { PRESETS } = require('./presets');
 const i18n = require('../ui/i18n');
 
@@ -238,7 +239,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('models:reveal', async (_e, filePath) => {
-    shell.showItemInFolder(filePath);
+    shell.showItemInFolder(withinRoot(settings.modelsDir, filePath));
     return true;
   });
 
@@ -289,7 +290,9 @@ function registerIpc() {
     activeUpdate = { startedAt: Date.now() };
     const onProgress = throttle((p) => send('update:progress', p), 150);
     try {
-      const dest = path.join(userDataDir(), 'downloads', name || 'modelharbor-update');
+      // name kommt aus dem Renderer (Asset-Name der Release-API) — nur der
+      // basename darf verwendet werden, sonst schreibt der Download beliebig wohin.
+      const dest = childPath(path.join(userDataDir(), 'downloads'), name || 'modelharbor-update');
       const result = await updater.downloadFile(url, dest, onProgress);
       return { ...result, assetPath: dest };
     } finally {
@@ -298,7 +301,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('update:openFile', async (_e, filePath) => {
-    const err = await shell.openPath(filePath);
+    const err = await shell.openPath(withinRoot(path.join(userDataDir(), 'downloads'), filePath));
     if (err) throw new Error(err);
     return true;
   });

@@ -20,21 +20,28 @@ class Logger {
   constructor() {
     this.debugEnabled = false;
     this.logPath = null;
+    this._written = 0;
     this._console = typeof console !== 'undefined' ? console : null;
   }
 
-  /** Aktiviert/kongruiert das Logging. Nicht idempotent-gefährlich, restart-fest. */
+  /** Aktiviert/konfiguriert das Logging. Nicht idempotent-gefährlich, restart-fest. */
   configure({ debug = false, dir = null } = {}) {
     this.debugEnabled = !!debug;
     this.logPath = dir ? path.join(dir, 'logs', 'modelharbor-debug.log') : null;
+    this._written = this._size();
     if (this.logPath) this._rotate();
     return this;
+  }
+
+  _size() {
+    try { return fs.statSync(this.logPath).size; } catch { return 0; }
   }
 
   _rotate() {
     try {
       if (fs.existsSync(this.logPath) && fs.statSync(this.logPath).size > MAX_LOG_BYTES) {
         fs.renameSync(this.logPath, `${this.logPath}.old`);
+        this._written = 0;
       }
     } catch { /* ignore */ }
   }
@@ -50,6 +57,10 @@ class Logger {
       try {
         fs.mkdirSync(path.dirname(this.logPath), { recursive: true });
         fs.appendFileSync(this.logPath, line);
+        // Auch während der Laufzeit rotieren, nicht nur beim App-Start —
+        // sonst wächst die Datei in einer langen Sitzung unbegrenzt.
+        this._written += Buffer.byteLength(line);
+        if (this._written > MAX_LOG_BYTES) this._rotate();
       } catch { /* ignore */ }
     }
   }
