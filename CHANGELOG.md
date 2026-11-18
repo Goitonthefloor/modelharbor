@@ -2,6 +2,21 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.5.1] - 2026-11-18
+
+### Fixed
+
+- **Lange Herkunfts-Pfade sprengten die Modellzeile.** Der neue Zusatzordner-Pfad steht in
+  der Modellzeile; ein langer, ununterbrochener Pfad (NAS-Freigabe, tiefer Ordnerbaum) hatte
+  keine Umbruchstelle. `.row-sub` bricht jetzt überall um (`overflow-wrap: anywhere`).
+- Doku: der Tab heißt **„Installiert“** (nicht „Lokal“) — CHANGELOG und README entsprechend
+  korrigiert.
+
+### Changed
+
+- UI-Smoke **28/28** (+1 Check: langer Herkunftspfad bricht um, statt überzulaufen;
+  Rot-Grün geprüft: ohne den CSS-Fix fällt der Check durch).
+
 ## [1.5.0] - 2026-11-18
 
 ### Added
@@ -9,7 +24,7 @@ All notable changes to ModelHarbor are documented in this file.
 - **Modelle aus weiteren Ordnern laden.** Unter Setup → „Weitere Modellordner“ lassen sich
   beliebige Ordner hinzufügen, die schon Modelle enthalten — z. B. eine bestehende
   LM-Studio-Sammlung, eine zweite Platte oder eine NAS-Freigabe. Die Modelle erscheinen im
-  Tab „Lokal“ mit Badge **Extern** und Angabe des Herkunftsordners und lassen sich genau wie
+  Tab „Installiert“ mit Badge **Extern** und Angabe des Herkunftsordners und lassen sich genau wie
   heruntergeladene Modelle laden.
   - Fremde Ablagen werden **zwei Ebenen tief** durchsucht (`<publisher>/<model>/<datei>.gguf`),
     der eigene Modellordner bleibt bei einer Ebene (Repo-Ordner).

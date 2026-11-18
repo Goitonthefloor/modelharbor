@@ -384,6 +384,25 @@ with sync_playwright() as p:
           and feat["extShowsSource"],
           json.dumps(feat, ensure_ascii=False))
 
+    # Lange Herkunfts-Pfade (NAS, zweite Platte) duerfen die Zeile nicht sprengen
+    longpath = page.evaluate("""async () => {
+      const long = '/mnt/sehr-lange-freigabe/auf-dem-nas/modell-sammlung/unterordner/noch-einer';
+      window.api.models.local = async () => ([
+        { id: 'ext0:x/y.gguf', repo: 'x/y', file: 'y-Q4_K_M.gguf', sizeLabel: '4.2 GB',
+          path: long + '/y-Q4_K_M.gguf', quant: 'Q4_K_M', external: true, sourceDir: long, sourceIndex: 0,
+          fit: { verdict: 'gpu', label: 'GPU', detail: 'passt', gpuLayers: 999 } },
+      ]);
+      await refreshLocal();
+      const row = document.querySelector('#local-list .row');
+      const sub = row.querySelector('.row-sub');
+      return { wrap: getComputedStyle(sub).overflowWrap,
+               overflow: row.scrollWidth - row.clientWidth,
+               showsPath: sub.textContent.includes(long) };
+    }""")
+    check("Langer Herkunftspfad bricht um statt ueberzulaufen",
+          longpath["wrap"] == "anywhere" and longpath["overflow"] <= 1 and longpath["showsPath"],
+          json.dumps(longpath, ensure_ascii=False))
+
     page.evaluate("setView('setup')")
     page.wait_for_timeout(250)
     src = page.evaluate("""async () => {
