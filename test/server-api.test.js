@@ -130,42 +130,41 @@ test('server-config: LAN-Schalter bestimmt die Bind-Adresse', () => {
   assert.equal(sc.bindHost(sc.resolve({ lan: true })), '0.0.0.0');
 });
 
-test('connectionInfo: lokale URL immer, LAN-URLs nur mit Schalter', () => {
-  const local = sc.connectionInfo(sc.resolve({}), ['192.0.2.50']);
+
+test('connectionInfo: lokale URL immer, LAN-URLs nur mit Schalter — Key immer aktiv', () => {
+  const local = sc.connectionInfo(sc.ensureKey({}), ['192.0.2.50']);
   assert.equal(local.localUrl, 'http://127.0.0.1:1234/v1');
   assert.deepEqual(local.lanUrls, []);
   assert.deepEqual(local.ips, []);
   assert.equal(local.model, 'ModelHarbor');
-  assert.equal(local.insecureLan, false);
+  assert.ok(local.apiKey.startsWith('mh-'), 'auch lokal ist ein Key aktiv');
 
-  const lan = sc.connectionInfo(sc.resolve({ lan: true }), ['192.0.2.50', '10.0.0.5']);
+  const lan = sc.connectionInfo(sc.ensureKey({ lan: true }), ['192.0.2.50', '10.0.0.5']);
   assert.deepEqual(lan.lanUrls, ['http://192.0.2.50:1234/v1', 'http://10.0.0.5:1234/v1']);
-  assert.equal(lan.insecureLan, true, 'LAN ohne Key muss als unsicher markiert sein');
-  const lanKey = sc.connectionInfo(sc.resolve({ lan: true, apiKey: 'mh-x' }), ['192.0.2.50']);
-  assert.equal(lanKey.insecureLan, false);
-  assert.equal(lanKey.hasKey, true);
+  assert.ok(lan.apiKey.startsWith('mh-'), 'LAN nie ohne Key');
+  const fixed = sc.generateKey();
+  const lanKey = sc.connectionInfo(sc.resolve({ lan: true, apiKey: fixed }), ['192.0.2.50']);
+  assert.equal(lanKey.apiKey, fixed, 'gespeicherter Key bleibt unverändert');
   assert.ok(lan.endpoints.some((e) => e.path === '/v1/chat/completions'));
   assert.ok(lan.endpoints.some((e) => e.path === '/health'));
+  // Die Ohne-Key-Warnung ist kein Zustand mehr, den die App erreichen kann.
+  assert.equal('insecureLan' in lan, false);
+  assert.equal('hasKey' in lan, false);
 });
 
-test('Agenten-Beispiele: mit Key Authorization, ohne Key Platzhalter', () => {
-  const withKey = sc.resolve({ port: 1234, apiKey: 'mh-abc' });
-  const curl = snip.curlExample(withKey, '192.0.2.50');
+test('Agenten-Beispiele: tragen immer den Key (kein Platzhalter-Pfad mehr)', () => {
+  const cfg = sc.ensureKey({ port: 1234 });
+  const curl = snip.curlExample(cfg, '192.0.2.50');
   assert.ok(curl.includes('curl http://192.0.2.50:1234/v1/chat/completions'));
-  assert.ok(curl.includes('Authorization: Bearer mh-abc'));
+  assert.ok(curl.includes('Authorization: Bearer ' + cfg.apiKey));
   assert.ok(curl.includes('"model":"ModelHarbor"'));
-  const py = snip.pythonExample(withKey, '192.0.2.50');
+  const py = snip.pythonExample(cfg, '192.0.2.50');
   assert.ok(py.includes('base_url="http://192.0.2.50:1234/v1"'));
-  assert.ok(py.includes('api_key="mh-abc"'));
-  const json = JSON.parse(snip.agentJson(withKey, '192.0.2.50'));
-  assert.deepEqual(json, { base_url: 'http://192.0.2.50:1234/v1', api_key: 'mh-abc', model: 'ModelHarbor' });
-
-  const noKey = sc.resolve({});
-  assert.ok(!snip.curlExample(noKey).includes('Authorization'));
-  assert.ok(snip.pythonExample(noKey).includes(sc.NO_KEY_PLACEHOLDER));
-  assert.equal(JSON.parse(snip.agentJson(noKey)).api_key, sc.NO_KEY_PLACEHOLDER);
+  assert.ok(py.includes('api_key="' + cfg.apiKey + '"'));
+  const json = JSON.parse(snip.agentJson(cfg, '192.0.2.50'));
+  assert.deepEqual(json, { base_url: 'http://192.0.2.50:1234/v1', api_key: cfg.apiKey, model: 'ModelHarbor' });
+  assert.equal('NO_KEY_PLACEHOLDER' in snip, false, 'toter Platzhalter ist entfernt');
 });
-
 test('generateKey: eindeutig, mit Präfix, ohne Leerzeichen', () => {
   const a = sc.generateKey();
   const b = sc.generateKey();
@@ -211,14 +210,15 @@ test('buildArgs: API-Key, CORS und parallele Slots', () => {
   assert.equal(val(args, '--alias'), 'ModelHarbor');
 });
 
-test('buildArgs: ohne Key/CORS-Einschränkung keine entsprechenden Flags', () => {
-  const args = argsWith({ host: '127.0.0.1', port: 1234, cors: true });
-  assert.ok(!args.includes('--api-key'));
+
+test('buildArgs: Key-Pflicht — CORS/Slots bleiben optional', () => {
+  const cfg = sc.ensureKey({});
+  const args = argsWith({ host: '127.0.0.1', port: 1234, cors: true, apiKey: cfg.apiKey });
+  assert.equal(val(args, '--api-key'), cfg.apiKey, 'Key steht immer in der Kommandozeile');
   assert.ok(!args.includes('--cors-origins'));   // Standard * = alle Origins erlaubt
   assert.ok(!args.includes('--parallel'));
   assert.equal(val(args, '--host'), '127.0.0.1');
 });
-
 test('buildArgs: Server-Flags und Modell-Einstellungen kombiniert', () => {
   const ms = require('../electron/model-settings.js');
   const resolved = ms.resolve({ global: { ctx: 8192 }, model: { ctx: 16384, cacheTypeK: 'q4_0', cacheTypeV: 'q4_0' } });
@@ -245,4 +245,55 @@ test('assertPortFree: freier Port geht, belegter Port wird klar gemeldet', async
   await assert.rejects(() => assertPortFree(port, '127.0.0.1'), /1234|belegt|in use/i);
   await new Promise((r) => srv.close(r));
   assert.equal(await assertPortFree(port, '127.0.0.1'), true);
+});
+
+/* --------------------------- API-Key-Pflicht --------------------------- */
+
+test('ensureKey: erzeugt einen Key wenn keiner gespeichert ist, ersetzt vorhandene nie', () => {
+  for (const stored of [undefined, null, {}, { apiKey: '' }, { apiKey: '   ' }]) {
+    const cfg = sc.ensureKey(stored);
+    assert.ok(cfg.apiKey.startsWith('mh-'), 'Key erzeugt für ' + JSON.stringify(stored));
+    assert.ok(!/\s/.test(cfg.apiKey), 'keine Leerzeichen im Key');
+  }
+  const fixed = sc.generateKey();
+  const existing = sc.ensureKey({ apiKey: fixed, port: 4321 });
+  assert.equal(existing.apiKey, fixed, 'gespeicherter Key bleibt (Agenten-Konfiguration)');
+  assert.equal(existing.port, 4321);
+  assert.equal(sc.ensureKey(existing).apiKey, fixed, 'stabil über mehrere Aufrufe');
+  const lan = sc.ensureKey({ lan: true });
+  assert.equal(lan.lan, true);
+  assert.equal(lan.port, 1234);
+  assert.notEqual(sc.ensureKey({}).apiKey, sc.ensureKey({}).apiKey, 'zwei leere Konfigs bekommen verschiedene Keys');
+});
+
+test('startServer: startet NIE ohne API-Key — mit Key läuft er an der Prüfung vorbei', async (t) => {
+  const dir = tmpDir(t);
+  const serverPath = path.join(dir, 'llama-server');
+  const modelPath = path.join(dir, 'm.gguf');
+  fs.writeFileSync(serverPath, '#!/bin/sh\nexit 3\n');
+  fs.writeFileSync(modelPath, 'GGUF');
+  const { startServer } = require('../electron/server.js');
+
+  for (const cfg of [{}, { host: '127.0.0.1' }, { apiKey: '' }, { apiKey: '   ' }]) {
+    await assert.rejects(
+      () => startServer({ serverPath, modelPath, presetId: 'balanced', serverConfig: cfg }),
+      /API-Key|api key/i,
+      'ohne Key muss der Start abgelehnt werden: ' + JSON.stringify(cfg),
+    );
+  }
+
+  // Gegenprobe: mit Key passiert die Key-Prüfung und der Start scheitert erst
+  // später (ONNX-Modellordner ohne Python-Venv) — der Guard blockt also nicht alles.
+  const free = await new Promise((r) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => { const port = srv.address().port; srv.close(() => r(port)); });
+  });
+  const onnxDir = path.join(dir, 'onnx-model');
+  fs.mkdirSync(onnxDir);
+  fs.writeFileSync(path.join(onnxDir, 'genai_config.json'), '{}');
+  const cfg = { ...sc.ensureKey({}), port: free };
+  await assert.rejects(
+    () => startServer({ serverPath, modelPath: onnxDir, presetId: 'balanced', serverConfig: cfg }),
+    /ONNX/i,
+  );
 });

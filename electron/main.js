@@ -120,7 +120,13 @@ function loadSettings() {
   logger.configure({ debug: settings.debugLog, dir: userDataDir() });
   i18n.setLang(settings.language);
   if (!Array.isArray(settings.extraModelDirs)) settings.extraModelDirs = [];
-  settings.server = sc.resolve(settings.server);
+  const hadKey = !!(settings.server && settings.server.apiKey);
+  settings.server = sc.ensureKey(settings.server);
+  if (!hadKey) {
+    // Erzeugten Key sofort persistieren: sonst bekäme jeder App-Start einen neuen
+    // und die bei Agenten hinterlegte Konfiguration würde ungültig.
+    try { fs.writeFileSync(file, JSON.stringify(settings, null, 2), 'utf8'); } catch { /* ignore */ }
+  }
   for (const d of [settings.modelsDir, settings.backendsDir]) {
     try { fs.mkdirSync(d, { recursive: true }); } catch { /* ignore */ }
   }
@@ -133,7 +139,7 @@ async function saveSettings(patch) {
   const prevServer = (settings && settings.server) || {};
   settings = { ...(settings || defaultSettings()), ...patch };
   if (!Array.isArray(settings.extraModelDirs)) settings.extraModelDirs = [];
-  settings.server = sc.resolve({ ...prevServer, ...(patch.server || {}) });
+  settings.server = sc.ensureKey({ ...prevServer, ...(patch.server || {}) });
   i18n.setLang(settings.language);
   const file = path.join(userDataDir(), 'settings.json');
   await fsp.mkdir(path.dirname(file), { recursive: true });

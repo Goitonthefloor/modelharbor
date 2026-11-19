@@ -2,6 +2,36 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.7.2] - 2026-11-19
+
+### Fixed
+
+- **Lokaler API-Server startet nie mehr ohne Schlüssel (Security-Review):** Der Server läuft jetzt
+  ausschließlich mit API-Key — für **llama.cpp und ONNX** an derselben Grenze durchgesetzt. Ist kein
+  Key gespeichert, wird beim Laden der Einstellungen einer erzeugt und **sofort persistiert**:
+  Neustarts behalten ihn, bei Agenten hinterlegte Konfigurationen bleiben gültig. Vorher startete der
+  Server auf `127.0.0.1` ohne API-Key-Flag — damit konnte jeder lokale Prozess und jede Webseite, die eine
+  Anfrage dorthin schickt, Inferenz auslösen und Modellantworten lesen.
+- **Ein Key aus Leerzeichen gilt nicht als Key:** die Startprüfung trimmt den Wert jetzt selbst.
+  Vorher rutschte ein nur aus Leerzeichen bestehender Wert als „vorhanden" durch die Prüfung.
+
+### Changed
+
+- Das Key-Feld im Server-Tab ist immer gefüllt; wird es geleert, entsteht ein neuer Key.
+  Der Button heißt jetzt **„Key neu erzeugen"**.
+- Die LAN-Warnung „ohne Key kann jedes Gerät im Netzwerk dein Modell benutzen" ist entfernt —
+  dieser Zustand kann nicht mehr eintreten.
+- Die Agenten-Beispiele (curl, Python, JSON) tragen immer den Key; der Ohne-Key-Platzhalter
+  ist entfallen.
+
+### Added
+
+- `server-config.ensureKey()` (erzeugt nur wenn nötig, ersetzt einen gespeicherten Key nie) und
+  Tests für Key-Erzeugung, Stabilität und Startverweigerung ohne Key. Suite: **172 Tests**.
+- Runtime-Nachweis gegen die echte App: die Prozess-argv enthält den Key, und der Key bleibt über
+  einen App-Neustart hinweg derselbe. Rot-Grün: auf dem Code vor diesem Release schlagen 5 der
+  neuen/angepassten Tests fehl (der Server startet dort tatsächlich ohne Key).
+
 ## [1.7.1] - 2026-11-19
 
 ### Fixed

@@ -110,7 +110,7 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
   // Server-Zugang für Agenten: API-Key, CORS, parallele Slots.
   // Kein simples --cors in llama.cpp: CORS läuft über --cors-origins
   // (Standard * = alle Origins; „localhost“ = nur same-origin).
-  if (sc.apiKey) args.push('--api-key', String(sc.apiKey));
+  args.push('--api-key', String(sc.apiKey));
   if (sc.cors === false) args.push('--cors-origins', 'localhost');
   if (sc.parallel) args.push('--parallel', String(sc.parallel));
   const cpuCount = (require('os').cpus() || []).length || 4;
@@ -151,7 +151,12 @@ async function startServer(opts) {
   if (!fs.existsSync(serverPath)) throw new Error(i18n.t('error.backendMissing', { path: serverPath }));
   if (!fs.existsSync(modelPath)) throw new Error(i18n.t('error.modelFileMissing', { path: modelPath }));
 
-  const sc = opts.serverConfig || {};
+  const sc = { ...(opts.serverConfig || {}) };
+  // Nie ohne Key starten: der Server wäre sonst für jeden lokalen Prozess und
+  // jede Webseite offen, die 127.0.0.1 anfragt. Gilt für llama UND ONNX.
+  // Trimmen, weil ein Key aus Leerzeichen sonst als "vorhanden" durchrutscht.
+  sc.apiKey = String(sc.apiKey || '').trim();
+  if (!sc.apiKey) throw new Error(i18n.t('error.serverKeyRequired'));
   const host = sc.host || '127.0.0.1';
   const fixedPort = opts.port || sc.port || null;
   // Fester Port (Server-Tab): nicht still ausweichen, sondern klar melden.
@@ -184,7 +189,7 @@ async function startServer(opts) {
       '--host', host,
       '--port', String(port),
       // Gleiche Zugangsregeln wie beim llama-Server: Key-Pflicht und CORS.
-      ...(sc.apiKey ? ['--api-key', sc.apiKey] : []),
+      '--api-key', String(sc.apiKey),
       '--cors-origins', sc.cors === false ? 'localhost' : '*',
       '--ep', opts.overrides.ep || 'cpu',
       '--max-tokens', String(maxTok),

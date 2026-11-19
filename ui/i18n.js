@@ -211,14 +211,10 @@
       de: 'Bindet an 0.0.0.0 — andere Geräte im Netzwerk können zugreifen',
       en: 'Binds to 0.0.0.0 — other devices on the network can connect',
     },
-    'server.lanWarning': {
-      de: 'Im LAN ohne API-Key kann jedes Gerät im Netzwerk dein Modell benutzen. Erzeuge einen Key.',
-      en: 'On the LAN without an API key, any device on the network can use your model. Generate a key.',
-    },
     'server.apiKey': { de: 'API-Key', en: 'API key' },
-    'server.apiKeyHint': { de: 'Optional lokal, im LAN dringend empfohlen', en: 'Optional locally, strongly recommended on the LAN' },
-    'server.apiKeyPlaceholder': { de: 'Kein Key — jeder darf zugreifen', en: 'No key — anyone may connect' },
-    'server.generateKey': { de: 'Key erzeugen', en: 'Generate key' },
+    'server.apiKeyHint': { de: 'Immer aktiv — der Server startet nie ohne Key. Chat und Agenten benutzen ihn automatisch.', en: 'Always on — the server never starts without a key. Chat and agents use it automatically.' },
+    'server.apiKeyPlaceholder': { de: 'Leer lassen = neuen Key erzeugen', en: 'Leave empty to generate a new key' },
+    'server.generateKey': { de: 'Key neu erzeugen', en: 'Regenerate key' },
     'server.cors': { de: 'CORS erlauben (alle Origins)', en: 'Allow CORS (all origins)' },
     'server.corsHint': { de: 'Aus = nur same-origin (localhost)', en: 'Off = same-origin only (localhost)' },
     'server.parallel': { de: 'Parallele Anfragen', en: 'Parallel requests' },
@@ -524,6 +520,10 @@
     'error.archiveUnsupportedMethod': {
       de: 'Nicht unterstützte ZIP-Kompressionsmethode ({method}) — Archiv abgelehnt.',
       en: 'Unsupported ZIP compression method ({method}) — archive rejected.',
+    },
+    'error.serverKeyRequired': {
+      de: 'Server startet nicht ohne API-Key — es wurde keiner erzeugt. Bitte die Einrichtung erneut öffnen.',
+      en: 'The server will not start without an API key — none was generated. Please reopen setup.',
     },
     'error.untrustedSender': {
       de: 'IPC-Aufruf aus einer nicht vertrauenswürdigen Quelle abgelehnt.',

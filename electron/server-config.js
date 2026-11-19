@@ -14,7 +14,7 @@ const os = require('os');
 const crypto = require('crypto');
 // Eine Quelle für die Agenten-Beispiele — wird auch vom Renderer benutzt.
 const snippets = require('../ui/server-snippets');
-const { MODEL_ALIAS, NO_KEY_PLACEHOLDER, baseUrl, curlExample, pythonExample, agentJson } = snippets;
+const { MODEL_ALIAS, baseUrl, curlExample, pythonExample, agentJson } = snippets;
 
 const DEFAULTS = { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4 };
 const LIMITS = { port: [1024, 65535], parallel: [1, 64] };
@@ -50,6 +50,18 @@ function resolve(stored) {
   return { ...DEFAULTS, ...normalize(stored) };
 }
 
+/**
+ * Stellt sicher, dass ein API-Key existiert. Ohne Key ist der lokale Server für
+ * jeden Prozess auf dem Rechner und jede Webseite offen, die eine Anfrage an
+ * 127.0.0.1 schickt — deshalb wird einer erzeugt, wenn keiner gespeichert ist.
+ * Der Aufrufer persistiert das Ergebnis, damit Agenten-Konfigurationen stabil
+ * bleiben. Ein vorhandener Key wird NIE ersetzt.
+ */
+function ensureKey(stored) {
+  const cfg = resolve(stored);
+  return cfg.apiKey ? cfg : { ...cfg, apiKey: generateKey() };
+}
+
 function bindHost(cfg) { return cfg.lan ? '0.0.0.0' : '127.0.0.1'; }
 
 /** IPv4-Adressen, unter denen die Maschine im LAN erreichbar ist. */
@@ -82,11 +94,8 @@ function connectionInfo(cfg, ips = []) {
     host: bindHost(cfg),
     model: MODEL_ALIAS,
     apiKey: key,
-    hasKey: !!key,
     cors: cfg.cors !== false,
     parallel: cfg.parallel,
-    // Ohne Key warnt das UI, sobald LAN aktiv ist.
-    insecureLan: !!cfg.lan && !key,
     endpoints: [
       { path: '/v1/chat/completions', method: 'POST', note: 'chat' },
       { path: '/v1/completions', method: 'POST', note: 'text' },
@@ -104,7 +113,7 @@ function generateKey() {
 }
 
 module.exports = {
-  DEFAULTS, LIMITS, MODEL_ALIAS, NO_KEY_PLACEHOLDER,
-  normalize, resolve, bindHost, lanAddresses, baseUrl, connectionInfo,
+  DEFAULTS, LIMITS, MODEL_ALIAS,
+  normalize, resolve, ensureKey, bindHost, lanAddresses, baseUrl, connectionInfo,
   authHeaderValue, curlExample, pythonExample, agentJson, generateKey,
 };

@@ -1205,8 +1205,6 @@ function renderServerStatus() {
 function updateServerAccessUi() {
   renderServerStatus();
   const a = serverAccess();
-  const warn = $('#srv-warning');
-  if (warn) warn.classList.toggle('is-hidden', !(a.lan && !a.apiKey));
   renderServerAgents();
   const start = $('#srv-start');
   const stop = $('#srv-stop');
@@ -1322,7 +1320,6 @@ function renderServer() {
         <div class="settings-label"><strong>${esc(t('server.parallel'))}</strong><span>${esc(t('server.parallelHint'))}</span></div>
         <input type="number" class="num-input" id="srv-parallel" min="1" max="64" step="1" value="${esc(cfg.parallel)}">
       </div>
-      <p class="srv-warning is-hidden" id="srv-warning">${esc(t('server.lanWarning'))}</p>
       <p class="srv-hint">${esc(t('server.applyHint'))}</p>
     </div>
 

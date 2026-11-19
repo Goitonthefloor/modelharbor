@@ -15,8 +15,9 @@ URL = Path(__file__).resolve().parent.parent.joinpath('ui', 'index.html').as_uri
 API_MOCK = """
 window.__apiCalls = [];
 window.__srvCfgCalls = [];
-window.__srvCfg = { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4 };
-window.__srvInfo = { ips: [], insecureLan: false, endpoints: [
+window.__srvCfg = { port: 1234, lan: false, apiKey: 'mh-testkey-0123456789abcdef', cors: true, parallel: 4 };
+window.__keySeq = 0;
+window.__srvInfo = { ips: [], endpoints: [
   { path: '/v1/chat/completions', method: 'POST' }, { path: '/v1/completions', method: 'POST' },
   { path: '/v1/models', method: 'GET' }, { path: '/health', method: 'GET' }] };
 window.__settingsCalls = [];
@@ -35,11 +36,10 @@ window.api = {
     setConfig: async (p) => {
       window.__srvCfgCalls.push(p);
       window.__srvCfg = { ...window.__srvCfg, ...p };
-      window.__srvInfo = { ...window.__srvInfo, ips: window.__srvCfg.lan ? ['192.0.2.50'] : [],
-                           insecureLan: window.__srvCfg.lan && !window.__srvCfg.apiKey };
+      window.__srvInfo = { ...window.__srvInfo, ips: window.__srvCfg.lan ? ['192.0.2.50'] : [] };
       return { config: window.__srvCfg, info: window.__srvInfo };
     },
-    generateKey: async () => ({ key: 'mh-testkey-0123456789abcdef' }),
+    generateKey: async () => ({ key: 'mh-regen-' + (++window.__keySeq) + '-0123456789abcdef' }),
   },
   hw: { scan: async () => ({ osName: 'Linux', arch: 'x64', cpuModel: 'Test CPU', cpuCores: 8, totalMemGB: 16, freeMemGB: 10, gpus: [], npus: [], recommendation: { primary: null, candidates: [] } }) },
   models: {
@@ -574,14 +574,15 @@ with sync_playwright() as p:
           fit: { verdict: 'gpu', label: 'GPU', detail: 'passt', gpuLayers: 999 } },
       ]);
       await refreshServerView();
-      const ids = ['srv-model','srv-preset','srv-start','srv-stop','srv-port','srv-lan','srv-key','srv-cors','srv-parallel','srv-warning','srv-agents','srv-log'];
+      const ids = ['srv-model','srv-preset','srv-start','srv-stop','srv-port','srv-lan','srv-key','srv-cors','srv-parallel','srv-agents','srv-log'];
       const agents = document.querySelector('#srv-agents').textContent;
       return {
         present: ids.every(i => !!document.querySelector('#' + i)),
         modelOptions: [...document.querySelector('#srv-model').options].map(o => o.value),
         port: document.querySelector('#srv-port').value,
         lanChecked: document.querySelector('#srv-lan').checked,
-        warnHidden: document.querySelector('#srv-warning').classList.contains('is-hidden'),
+        noWarning: !document.querySelector('#srv-warning'),
+        keyPresent: document.querySelector('#srv-key').value.startsWith('mh-'),
         hasLocalUrl: agents.includes('http://127.0.0.1:1234/v1'),
         hasModelName: agents.includes('ModelHarbor'),
         hasCurl: agents.includes('curl http://127.0.0.1:1234/v1/chat/completions'),
@@ -594,7 +595,7 @@ with sync_playwright() as p:
     }""")
     check("Server-Tab: Modellwahl, Zugang, Agenten-Karte mit Snippets",
           srv["present"] and srv["port"] == "1234" and srv["lanChecked"] is False
-          and srv["warnHidden"] is True and srv["hasLocalUrl"] and srv["hasModelName"]
+          and srv["noWarning"] is True and srv["keyPresent"] is True and srv["hasLocalUrl"] and srv["hasModelName"]
           and srv["hasCurl"] and srv["hasPython"] and srv["hasJson"] and srv["hasEndpoints"]
           and srv["copyButtons"] >= 5 and "owner__model/model-Q4_K_M.gguf" in srv["modelOptions"],
           json.dumps(srv, ensure_ascii=False))
@@ -606,14 +607,14 @@ with sync_playwright() as p:
       const agents = document.querySelector('#srv-agents').textContent;
       return {
         saved: window.__srvCfgCalls.slice(),
-        warnVisible: !document.querySelector('#srv-warning').classList.contains('is-hidden'),
+        noWarning: !document.querySelector('#srv-warning'),
         lanUrl: agents.includes('http://192.0.2.50:1234/v1'),
         curlLan: agents.includes('curl http://192.0.2.50:1234/v1/chat/completions'),
-        noKeyYet: !agents.includes('Authorization'),
+        hasAuth: agents.includes('Authorization: Bearer ' + window.__srvCfg.apiKey),
       };
     }""")
-    check("LAN-Schalter: warnt ohne Key und zeigt die LAN-Adresse",
-          lan["warnVisible"] is True and lan["lanUrl"] and lan["curlLan"] and lan["noKeyYet"]
+    check("LAN-Schalter: Key bleibt aktiv, keine Warnung, LAN-Adresse sichtbar",
+          lan["noWarning"] is True and lan["lanUrl"] and lan["curlLan"] and lan["hasAuth"]
           and any(c.get("lan") is True for c in lan["saved"]),
           json.dumps(lan, ensure_ascii=False))
 
@@ -623,14 +624,13 @@ with sync_playwright() as p:
       const agents = document.querySelector('#srv-agents').textContent;
       return {
         fieldValue: document.querySelector('#srv-key').value,
-        warnHidden: document.querySelector('#srv-warning').classList.contains('is-hidden'),
-        curlHasAuth: agents.includes('Authorization: Bearer mh-testkey-0123456789abcdef'),
-        jsonHasKey: agents.includes('"api_key": "mh-testkey-0123456789abcdef"'),
+        curlHasAuth: agents.includes('Authorization: Bearer ' + document.querySelector('#srv-key').value),
+        jsonHasKey: agents.includes('"api_key": "' + document.querySelector('#srv-key').value + '"'),
         saved: window.__srvCfgCalls.slice(),
       };
     }""")
-    check("Key erzeugen: Warnung weg, Key in curl/Python/JSON",
-          key["fieldValue"].startswith("mh-") and key["warnHidden"] is True
+    check("Key neu erzeugen: neuer Key in Feld und curl/Python/JSON",
+          key["fieldValue"].startswith("mh-regen-")
           and key["curlHasAuth"] and key["jsonHasKey"]
           and any(c.get("apiKey", "").startswith("mh-") for c in key["saved"]),
           json.dumps(key, ensure_ascii=False))
