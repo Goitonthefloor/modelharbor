@@ -11,6 +11,7 @@ const server = require('./server');
 const updater = require('./updater');
 const logger = require('./logger');
 const { childPath, withinRoot, withinAnyRoot } = require('./paths');
+const { isAppUrl } = require('./window-guard');
 const ms = require('./model-settings');
 const sc = require('./server-config');
 const gguf = require('./gguf-meta');
@@ -18,6 +19,9 @@ const { PRESETS } = require('./presets');
 const i18n = require('../ui/i18n');
 
 const isDev = !app.isPackaged;
+
+/** Die einzige Datei, der Fenster und IPC vertrauen (Navigation + Absender). */
+const APP_FILE = path.resolve(__dirname, '..', 'ui', 'index.html');
 let win = null;
 let hwCache = null;
 let hwCacheTime = 0;
@@ -188,6 +192,16 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+  // Navigation nur auf die eigene App-Datei. Electron führt das Preload-Skript
+  // bei JEDER Navigation erneut aus — ein fremdes Dokument (Datei-Drop, Link,
+  // Renderer-Schwachstelle) bekäme sonst die komplette window.api-Brücke.
+  const blockForeignNavigation = (event, url) => {
+    if (isAppUrl(url, APP_FILE)) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+  };
+  win.webContents.on('will-navigate', blockForeignNavigation);
+  win.webContents.on('will-frame-navigate', blockForeignNavigation);
   win.on('closed', () => { win = null; });
 }
 
@@ -222,8 +236,21 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+/**
+ * Registriert einen IPC-Handler mit Absenderprüfung. Jeder Aufruf muss aus der
+ * eigenen App-Datei kommen — ein fremder Frame darf keine Dateioperationen,
+ * Einstellungen oder Serverstarts auslösen (Defense in Depth zur Navigationssperre).
+ */
+function handle(channel, fn) {
+  ipcMain.handle(channel, (event, ...args) => {
+    const url = event && event.senderFrame ? event.senderFrame.url : null;
+    if (!isAppUrl(url, APP_FILE)) throw new Error(i18n.t('error.untrustedSender'));
+    return fn(event, ...args);
+  });
+}
+
 function registerIpc() {
-  ipcMain.handle('app:info', () => ({
+  handle('app:info', () => ({
     version: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
@@ -234,22 +261,22 @@ function registerIpc() {
     isDev,
   }));
 
-  ipcMain.handle('settings:get', () => settings);
-  ipcMain.handle('settings:set', async (_e, patch) => {
+  handle('settings:get', () => settings);
+  handle('settings:set', async (_e, patch) => {
     const next = await saveSettings(patch || {});
     try { await fsp.mkdir(next.modelsDir, { recursive: true }); } catch { /* ignore */ }
     try { await fsp.mkdir(next.backendsDir, { recursive: true }); } catch { /* ignore */ }
     return next;
   });
 
-  ipcMain.handle('hw:scan', async (_e, force) => {
+  handle('hw:scan', async (_e, force) => {
     const hw = await scanHardwareCached(!!force);
     return hw;
   });
 
-  ipcMain.handle('presets:list', () => PRESETS);
+  handle('presets:list', () => PRESETS);
 
-  ipcMain.handle('backends:list', async () => {
+  handle('backends:list', async () => {
     let release = null;
     let error = null;
     try { release = await backends.latestRelease(); } catch (e) { error = e.message; }
@@ -263,26 +290,26 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle('backends:install', async (_e, backendId) => {
+  handle('backends:install', async (_e, backendId) => {
     const onProgress = throttle((p) => send('backend:progress', p), 120);
     const manifest = await backends.installBackend(backendId, { installRoot: settings.backendsDir, onProgress });
     send('backend:progress', { phase: 'done', backend: backendId, percent: 100, manifest });
     return manifest;
   });
 
-  ipcMain.handle('backends:remove', async (_e, backendId) => {
+  handle('backends:remove', async (_e, backendId) => {
     await backends.removeBackend(settings.backendsDir, backendId);
     return { removed: backendId };
   });
 
-  ipcMain.handle('models:catalog', async () => {
+  handle('models:catalog', async () => {
     const hw = await scanHardwareCached();
     return models.catalogWithFit(hw);
   });
 
-  ipcMain.handle('models:search', async (_e, query) => models.searchModels(query));
+  handle('models:search', async (_e, query) => models.searchModels(query));
 
-  ipcMain.handle('models:files', async (_e, repo) => {
+  handle('models:files', async (_e, repo) => {
     const info = await models.modelFiles(repo);
     const hw = await scanHardwareCached();
     return {
@@ -294,7 +321,7 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle('models:download', async (_e, opts = {}) => {
+  handle('models:download', async (_e, opts = {}) => {
     const { repo, file } = opts;
     const isOnnx = !!opts.isOnnx;
     const onnxSub = opts.onnxSub || (models.CATALOG.find((c) => c.repo === repo) || {}).onnxSub;
@@ -319,7 +346,7 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('models:local', async () => {
+  handle('models:local', async () => {
     const hw = await scanHardwareCached();
     const list = await models.listLocal(settings.modelsDir, settings.extraModelDirs);
     return list.map((m) => {
@@ -340,21 +367,21 @@ function registerIpc() {
 
   /* ------------------- Modellspezifische Einstellungen ------------------- */
 
-  ipcMain.handle('modelSettings:schema', async () => ({
+  handle('modelSettings:schema', async () => ({
     cacheTypes: ms.CACHE_TYPES,
     defaultCache: ms.DEFAULT_CACHE,
     limits: ms.LIMITS,
     keys: ms.ALL_KEYS,
   }));
 
-  ipcMain.handle('modelSettings:get', async (_e, modelId) => {
+  handle('modelSettings:get', async (_e, modelId) => {
     const key = ms.modelKey(modelId);
     const stored = modelSettingsStore[key] || {};
     const resolved = resolveModelSettings(modelId);
     return { key, stored, resolved, summary: ms.summary(resolved) };
   });
 
-  ipcMain.handle('modelSettings:set', async (_e, modelId, patch) => {
+  handle('modelSettings:set', async (_e, modelId, patch) => {
     const key = ms.modelKey(modelId);
     if (!key) throw new Error(i18n.t('error.invalidPath'));
     const stored = await saveModelSettings(key, patch);
@@ -362,26 +389,26 @@ function registerIpc() {
     return { key, stored, resolved, summary: ms.summary(resolved) };
   });
 
-  ipcMain.handle('modelSettings:reset', async (_e, modelId) => {
+  handle('modelSettings:reset', async (_e, modelId) => {
     const key = ms.modelKey(modelId);
     delete modelSettingsStore[key];
     await ms.writeStore(modelSettingsFile(), modelSettingsStore);
     return { key, stored: {}, resolved: resolveModelSettings(modelId) };
   });
 
-  ipcMain.handle('models:delete', async (_e, id) => {
+  handle('models:delete', async (_e, id) => {
     await models.deleteModel(settings.modelsDir, id);
     return { deleted: id };
   });
 
-  ipcMain.handle('models:reveal', async (_e, filePath) => {
+  handle('models:reveal', async (_e, filePath) => {
     shell.showItemInFolder(withinAnyRoot(modelRoots(), filePath));
     return true;
   });
 
   /* ------------------- Zusätzliche Modellordner ------------------- */
 
-  ipcMain.handle('models:sources', async () => {
+  handle('models:sources', async () => {
     const dirs = settings.extraModelDirs || [];
     return dirs.map((dir, index) => ({
       index,
@@ -390,7 +417,7 @@ function registerIpc() {
     }));
   });
 
-  ipcMain.handle('models:addSource', async () => {
+  handle('models:addSource', async () => {
     const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     if (res.canceled || !res.filePaths.length) return { canceled: true, sources: settings.extraModelDirs };
     const dir = path.resolve(res.filePaths[0]);
@@ -406,7 +433,7 @@ function registerIpc() {
     return { canceled: false, dir, count: found.length, sources: next };
   });
 
-  ipcMain.handle('models:removeSource', async (_e, dir) => {
+  handle('models:removeSource', async (_e, dir) => {
     // Entfernt nur den Eintrag — die Dateien im Ordner bleiben unangetastet.
     const target = path.resolve(String(dir || ''));
     const next = (settings.extraModelDirs || []).filter((d) => path.resolve(d) !== target);
@@ -414,7 +441,7 @@ function registerIpc() {
     return { removed: dir, sources: next };
   });
 
-  ipcMain.handle('server:start', async (_e, opts) => {
+  handle('server:start', async (_e, opts) => {
     const installed = await backends.listInstalled(settings.backendsDir);
     const wanted = opts.backendId || (hwCache && hwCache.recommendation ? hwCache.recommendation.primary : null);
     let backend = installed.find((b) => b.id === wanted) || installed[0];
@@ -453,44 +480,44 @@ function registerIpc() {
     return { ...result, backend: backend.id, settings: resolved };
   });
 
-  ipcMain.handle('server:stop', async () => server.stopServer());
-  ipcMain.handle('server:state', () => server.getState());
-  ipcMain.handle('server:logs', () => server.getState().logs);
+  handle('server:stop', async () => server.stopServer());
+  handle('server:state', () => server.getState());
+  handle('server:logs', () => server.getState().logs);
 
   /* ------------------- API-Server für Agenten ------------------- */
 
-  ipcMain.handle('server:config', async () => serverInfo());
+  handle('server:config', async () => serverInfo());
 
-  ipcMain.handle('server:setConfig', async (_e, patch) => {
+  handle('server:setConfig', async (_e, patch) => {
     const clean = sc.normalize(patch);
     await saveSettings({ server: clean });
     return serverInfo();
   });
 
-  ipcMain.handle('server:generateKey', async () => ({ key: sc.generateKey() }));
+  handle('server:generateKey', async () => ({ key: sc.generateKey() }));
 
-  ipcMain.handle('dialog:pickFolder', async () => {
+  handle('dialog:pickFolder', async () => {
     const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     if (res.canceled || !res.filePaths.length) return null;
     return res.filePaths[0];
   });
 
-  ipcMain.handle('shell:openExternal', async (_e, url) => {
+  handle('shell:openExternal', async (_e, url) => {
     if (!/^https?:\/\//i.test(url)) return false;
     await shell.openExternal(url);
     return true;
   });
 
-  ipcMain.handle('shell:showModels', async () => {
+  handle('shell:showModels', async () => {
     shell.openPath(settings.modelsDir);
     return settings.modelsDir;
   });
 
   // Update-Check gegen GitHub-Releases
-  ipcMain.handle('update:check', async () =>
+  handle('update:check', async () =>
     updater.checkForUpdate({ currentVersion: app.getVersion(), platform: process.platform }));
 
-  ipcMain.handle('update:download', async (_e, { url, name }) => {
+  handle('update:download', async (_e, { url, name }) => {
     if (activeUpdate) throw new Error(i18n.t('error.updateRunning'));
     activeUpdate = { startedAt: Date.now() };
     const onProgress = throttle((p) => send('update:progress', p), 150);
@@ -505,13 +532,13 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('update:openFile', async (_e, filePath) => {
+  handle('update:openFile', async (_e, filePath) => {
     const err = await shell.openPath(withinRoot(path.join(userDataDir(), 'downloads'), filePath));
     if (err) throw new Error(err);
     return true;
   });
 
-  ipcMain.handle('update:openReleases', async () => {
+  handle('update:openReleases', async () => {
     shell.openExternal('https://github.com/Goitonthefloor/modelharbor/releases');
     return true;
   });

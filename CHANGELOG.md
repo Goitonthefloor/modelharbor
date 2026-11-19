@@ -2,6 +2,42 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.7.1] - 2026-11-19
+
+### Fixed
+
+- **Integrität aller Downloads (Security-Review):** Heruntergeladene Backend-Archive, GGUF-Modelle,
+  ONNX-Dateien und das uv-Archiv werden jetzt **vor dem Entpacken bzw. Umbenennen per Hash geprüft**.
+  Erwartungswerte kommen aus der GitHub-Release-API (`assets[].digest`) und der HuggingFace-API
+  (`lfs.sha256` für LFS-Dateien, `blobId` = Git-Blob-SHA1 für kleine Config-Dateien). Bisher wurde
+  nur die Dateigröße verglichen — eine gleich große, inhaltlich andere Datei blieb unbemerkt.
+  **Fail closed:** fehlt der Digest oder weicht er ab, wird die Datei verworfen (und bei Abweichung
+  gelöscht, damit kein Resume sie später übernimmt). Neues Modul `electron/integrity.js`.
+- **Renderer-Navigation und IPC-Absender (Security-Review):** Das Fenster beschränkt Navigationen
+  jetzt per `will-navigate`/`will-frame-navigate` auf die eigene `ui/index.html`; Datei-Drops,
+  Link-Klicks und iframes auf fremde Dokumente laden nicht mehr. Zusätzlich prüft **jeder** der
+  36 IPC-Handler den Absender (`event.senderFrame.url`) gegen die App-Datei. Vorher bekam ein
+  fremdes Dokument nach einer Navigation die komplette `window.api`-Brücke (Modelle löschen,
+  Einstellungen schreiben, Backends entfernen, Server starten). Neues Modul `electron/window-guard.js`.
+- **Archiv-Budgets gegen Zip-Bomben (Security-Review):** `extractZipSafe` begrenzt jetzt die
+  entpackte Gesamtgröße (16 GiB) und die Eintragszahl (20 000) — geprüft gegen die deklarierte
+  Größe **und** die tatsächlich geschriebenen Bytes. Dasselbe Budget gilt für `tar.gz`/`.tgz`
+  (Vorabprüfung der Header-Summen). Vorher konnte ein Archiv das Installationslaufwerk füllen.
+- **Hänger bei manipulierten ZIP-Headern (Security-Review, DoS):** Ist die deklarierte
+  `uncompressedSize` kleiner als die real entpackten Daten, liefert yauzl weder Bytes noch einen
+  Fehler und die Installation hing endlos. ModelHarbor inflatiert Deflate-Einträge jetzt selbst
+  (`decompress: false` + `zlib.createInflateRaw()`), zählt die echten Bytes und bricht kontrolliert
+  ab. Unbekannte Kompressionsmethoden (alles außer Store/Deflate) werden abgelehnt.
+
+### Added
+
+- `test/security-round3.test.js`: 22 Regressionstests mit Angriffs-Triggern, alternativen
+  bösartigen Darstellungen (gleiche Größe/anderer Inhalt, lügender ZIP-Header, Präfix-Kollision
+  bei der App-URL) und Gegenproben für legitimes Verhalten. Die Modell-Download-Tests fahren
+  den echten Download-Pfad gegen einen lokalen HTTPS-Server. Gesamt: **170 Tests**.
+- Rot-Grün-Nachweis: Auf dem Code vor diesem Release schlagen 9 der neuen Tests fehl und der
+  Lying-Header-Test läuft in einen Timeout (der behobene Hänger).
+
 ## [1.7.0] - 2026-11-18
 
 ### Added

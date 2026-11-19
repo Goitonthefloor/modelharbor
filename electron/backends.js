@@ -10,11 +10,23 @@ const fsp = require('fs/promises');
 const path = require('path');
 const https = require('https');
 const { pipeline } = require('stream/promises');
+const { Transform } = require('stream');
+const zlib = require('zlib');
 const yauzl = require('yauzl');
 const tar = require('tar');
 const i18n = require('../ui/i18n');
+const { verifyDownload } = require('./integrity');
 
 const RELEASES_API = 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=25';
+
+/**
+ * Grenzen für entpackte Archive. Ohne Budget füllt ein Archiv mit hoher
+ * Kompressionsrate oder sehr vielen Einträgen das Installationslaufwerk, bevor
+ * eine andere Prüfung greift (Zip-Bomb → ENOSPC, App schreibt nichts mehr).
+ * Großzügig genug für echte CUDA/ROCm-Builds, aber endlich.
+ */
+const ARCHIVE_MAX_TOTAL_BYTES = 16 * 1024 ** 3; // 16 GiB entpackt
+const ARCHIVE_MAX_ENTRIES = 20000;
 
 /** Backend-Definitionen: welche Release-Assets gehören dazu. */
 const BACKENDS = {
@@ -323,20 +335,45 @@ function availableBackends(hw, release) {
 
 /**
  * Entpackt eine ZIP-Datei sicher: jeder Eintrag wird gegen das Zielverzeichnis
- * geprüft (kein Traversal, keine absoluten Pfade), Symlinks werden abgelehnt.
+ * geprüft (kein Traversal, keine absoluten Pfade), Symlinks werden abgelehnt,
+ * und die entpackte Gesamtgröße sowie die Eintragszahl sind begrenzt.
  * Ersetzt extract-zip 2.0.1, dessen Symlink-Behandlung CVEs aufwies
  * (GHSA-7pqw-9j4j-h8q3, GHSA-jmr9-qjv8-65gv).
+ *
+ * Das Budget wird zweifach geprüft: gegen die deklarierte uncompressedSize
+ * (billige Vorabprüfung) UND gegen die tatsächlich geschriebenen Bytes — ein
+ * Archiv, dessen Header lügen, kommt sonst am Limit vorbei. Inflatiert wird
+ * selbst (yauzl decompress:false), weil yauzl bei lügenden Größenangaben
+ * endlos stallt statt einen Fehler zu liefern.
  */
-async function extractZipSafe(zipPath, targetDir) {
+async function extractZipSafe(zipPath, targetDir, opts = {}) {
+  const maxTotalBytes = opts.maxTotalBytes || ARCHIVE_MAX_TOTAL_BYTES;
+  const maxEntries = opts.maxEntries || ARCHIVE_MAX_ENTRIES;
   const root = path.resolve(targetDir);
   await fsp.mkdir(root, { recursive: true });
   return new Promise((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
       if (err) return reject(err);
-      zipfile.on('error', reject);
-      const fail = (e) => { try { zipfile.close(); } catch { /* ignore */ } reject(e); };
+      let failed = false;
+      const fail = (e) => {
+        if (failed) return;
+        failed = true;
+        try { zipfile.close(); } catch { /* ignore */ }
+        reject(e);
+      };
+      const tooLarge = () => new Error(i18n.t('error.archiveTooLarge', {
+        limit: `${Math.round(maxTotalBytes / 1073741824)} GB`,
+      }));
+      zipfile.on('error', fail);
+      let entryCount = 0;
+      let written = 0;
       zipfile.readEntry();
       zipfile.on('entry', (entry) => {
+        if (failed) return;
+        entryCount += 1;
+        if (entryCount > maxEntries) {
+          return fail(new Error(i18n.t('error.archiveTooManyEntries', { max: maxEntries })));
+        }
         // Nur reguläre Dateien und Verzeichnisse; Symlinks und andere Typen ablehnen.
         const mode = (entry.externalFileAttributes >>> 16) & 0xffff;
         const isDir = (mode & 0o170000) === 0o040000 || /\/$/.test(entry.fileName);
@@ -350,25 +387,75 @@ async function extractZipSafe(zipPath, targetDir) {
         }
         if (isDir) {
           fsp.mkdir(target, { recursive: true })
-            .then(() => zipfile.readEntry())
+            .then(() => { if (!failed) zipfile.readEntry(); })
             .catch(fail);
           return;
         }
+        const declared = Number(entry.uncompressedSize) || 0;
+        if (written + declared > maxTotalBytes) return fail(tooLarge());
+        // Nur Store (0) und Deflate (8) — alles andere (z. B. AES) ablehnen.
+        const method = entry.compressionMethod;
+        if (method !== 0 && method !== 8) {
+          return fail(new Error(i18n.t('error.archiveUnsupportedMethod', { method })));
+        }
         fsp.mkdir(path.dirname(target), { recursive: true })
           .then(() => {
-            zipfile.openReadStream(entry, (sErr, readStream) => {
+            // decompress:false + eigene Inflation. Grund: yauzl bleibt endlos
+            // stehen, wenn die deklarierte uncompressedSize KLEINER ist als die
+            // real entpackten Daten (lügender Header) — es fließen dann keine
+            // Bytes und kein Fehler, die Installation hinge für immer (DoS).
+            // Mit eigener Inflation zählen wir die echten Bytes und brechen ab.
+            // Für Store-Einträge verbietet yauzl die Option, daher nur bei 8.
+            zipfile.openReadStream(entry, method === 8 ? { decompress: false } : {}, (sErr, rawStream) => {
               if (sErr) return fail(sErr);
-              const out = fs.createWriteStream(target);
-              out.on('error', fail);
-              readStream.on('error', fail);
-              readStream.pipe(out).on('close', () => zipfile.readEntry());
+              if (failed) { rawStream.destroy(); return; }
+              // Zählt die real geschriebenen Bytes und bricht bei Überschreitung ab.
+              const budget = new Transform({
+                transform(chunk, _enc, cb) {
+                  written += chunk.length;
+                  if (written > maxTotalBytes) return cb(tooLarge());
+                  cb(null, chunk);
+                },
+              });
+              const stages = method === 8
+                ? [rawStream, zlib.createInflateRaw(), budget, fs.createWriteStream(target)]
+                : [rawStream, budget, fs.createWriteStream(target)];
+              pipeline(...stages)
+                .then(() => { if (!failed) zipfile.readEntry(); })
+                .catch(fail);
             });
           })
           .catch(fail);
       });
-      zipfile.on('end', () => resolve(targetDir));
+      zipfile.on('end', () => { if (!failed) resolve(targetDir); });
     });
   });
+}
+
+/**
+ * Prüft ein tar-Archiv VOR dem Entpacken gegen dasselbe Budget. node-tar
+ * schreibt pro Eintrag genau die im Header deklarierte Bytezahl — die Summe der
+ * Header-Größen ist damit die tatsächliche entpackte Größe. Zähler statt
+ * Liste: konstanter Speicher, auch bei Archiven mit sehr vielen Einträgen.
+ */
+async function assertTarBudget(archivePath, opts = {}) {
+  const maxTotalBytes = opts.maxTotalBytes || ARCHIVE_MAX_TOTAL_BYTES;
+  const maxEntries = opts.maxEntries || ARCHIVE_MAX_ENTRIES;
+  let total = 0;
+  let count = 0;
+  await tar.t({
+    file: archivePath,
+    onReadEntry: (entry) => { count += 1; total += entry.size || 0; },
+  });
+  if (count > maxEntries) {
+    throw new Error(i18n.t('error.archiveTooManyEntries', { max: maxEntries }));
+  }
+  if (total > maxTotalBytes) {
+    throw new Error(i18n.t('error.archiveTooLarge', {
+      limit: `${Math.round(maxTotalBytes / 1073741824)} GB`,
+    }));
+  }
+  return { total, count };
 }
 
 async function findServerBinary(dir) {
@@ -419,6 +506,10 @@ async function installBackend(backendId, { installRoot, onProgress = () => {} })
         percent: overall,
       });
     });
+    // Integrität VOR dem Entpacken: diese Binaries werden gleich ausgeführt.
+    // Die Release-API liefert assets[].digest — ohne Abgleich wäre eine
+    // manipulierte Auslieferung nicht von einer echten zu unterscheiden.
+    await verifyDownload(filePath, { sha256: asset.sha256 }, asset.name);
     doneBytes += asset.size || (fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
   }
 
@@ -429,6 +520,7 @@ async function installBackend(backendId, { installRoot, onProgress = () => {} })
     if (/\.zip$/i.test(asset.name)) {
       await extractZipSafe(filePath, targetDir);
     } else if (/\.tar\.gz$/i.test(asset.name) || /\.tgz$/i.test(asset.name)) {
+      await assertTarBudget(filePath);
       await tar.x({ file: filePath, cwd: targetDir, preservePaths: false });
     }
   }
@@ -567,9 +659,15 @@ async function ensureUv(installRoot, onProgress = () => {}) {
     phase: 'download', backend: 'onnx', file: 'Python 3.12 (uv)',
     received: p.received, fileTotal: p.total, percent: 15 + (p.percent || 0) * 0.3,
   }));
+  // uv wird ausgeführt, um Python zu installieren — gleiche Integritätspflicht.
+  await verifyDownload(archive, { sha256: asset.digest }, assetName);
 
-  if (/\.zip$/i.test(assetName)) await extractZipSafe(archive, toolsDir);
-  else await tar.x({ file: archive, cwd: toolsDir, preservePaths: false });
+  if (/\.zip$/i.test(assetName)) {
+    await extractZipSafe(archive, toolsDir);
+  } else {
+    await assertTarBudget(archive);
+    await tar.x({ file: archive, cwd: toolsDir, preservePaths: false });
+  }
 
   const uvPath = await findUvBinary(toolsDir);
   if (!uvPath) throw new Error(i18n.t('error.uvBinaryMissing'));
@@ -671,6 +769,9 @@ module.exports = {
   getJson,
   downloadToFile,
   extractZipSafe,
+  assertTarBudget,
+  ARCHIVE_MAX_TOTAL_BYTES,
+  ARCHIVE_MAX_ENTRIES,
   uvAssetFor,
   ensureUv,
 };

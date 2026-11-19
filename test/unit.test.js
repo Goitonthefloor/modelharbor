@@ -530,10 +530,10 @@ test('parseOnnxFiles: fremder onnxSub liefert leere Liste, Ungültiges crasht ni
   assert.deepEqual(models.parseOnnxFiles(onnxSiblings, 'cuda/cuda-int4-rtn-block-32'), []);
   assert.deepEqual(models.parseOnnxFiles(onnxSiblings, 'gibts/nicht'), []);
   assert.deepEqual(models.parseOnnxFiles(null, 'x'), []);
-  assert.deepEqual(models.parseOnnxFiles(onnxSiblings, ''), [{ name: 'config.json', repoPath: 'config.json', size: 876 }]);
+  assert.deepEqual(models.parseOnnxFiles(onnxSiblings, ''), [{ name: 'config.json', repoPath: 'config.json', size: 876, sha256: null, blobId: null }]);
   // anderer Unterordner bleibt getrennt (keine Vermischung von gpu/ und cpu_and_mobile/)
   assert.deepEqual(models.parseOnnxFiles(onnxSiblings, 'gpu/gpu-int4-rtn-block-32'),
-    [{ name: 'model.onnx.data', repoPath: 'gpu/gpu-int4-rtn-block-32/model.onnx.data', size: 999 }]);
+    [{ name: 'model.onnx.data', repoPath: 'gpu/gpu-int4-rtn-block-32/model.onnx.data', size: 999, sha256: null, blobId: null }]);
 });
 
 test('parseOnnxFiles: erkennt auch Phi-4-Mini mit vocab.json/merges.txt', () => {

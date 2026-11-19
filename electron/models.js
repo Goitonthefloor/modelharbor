@@ -9,6 +9,7 @@ const path = require('path');
 const https = require('https');
 const { pipeline } = require('stream/promises');
 const { isWithin } = require('./paths');
+const { verifyDownload } = require('./integrity');
 
 const HF = 'https://huggingface.co';
 
@@ -274,6 +275,20 @@ function bytesFromSizeEntry(s) {
   return 0;
 }
 
+/**
+ * Erwartete Inhalts-Hashes eines HF-siblings (?blobs=true):
+ *  - LFS-Dateien (GGUF, ONNX-Gewichte): lfs.sha256
+ *  - kleine Nicht-LFS-Dateien (config/tokenizer): blobId = Git-Blob-SHA1
+ * Beide werden nach dem Download geprüft; fehlt keiner von beiden, wird die
+ * Datei abgelehnt (fail closed) statt nur auf die Größe zu vertrauen.
+ */
+function digestsFromEntry(s) {
+  return {
+    sha256: (s && s.lfs && s.lfs.sha256) || null,
+    blobId: (s && s.blobId) || null,
+  };
+}
+
 async function modelFiles(repo) {
   const data = await getJson(`${HF}/api/models/${repo}?blobs=true`);
   const siblings = Array.isArray(data.siblings) ? data.siblings : [];
@@ -287,6 +302,7 @@ async function modelFiles(repo) {
       quant: quantFromName(name),
       auxiliary: isAuxiliary(name),
       split: isSplitPart(name),
+      ...digestsFromEntry(s),
     });
   }
   // Splits gruppieren
@@ -406,7 +422,7 @@ function parseOnnxFiles(siblings, onnxSub) {
     const rel = rfilename.slice(prefix.length);
     if (!rel || rel.includes('/')) continue; // nur Dateien direkt in onnxSub
     if (!ONNX_FILE_RE.test(rel)) continue;
-    out.push({ name: rel, repoPath: rfilename, size: bytesFromSizeEntry(s) });
+    out.push({ name: rel, repoPath: rfilename, size: bytesFromSizeEntry(s), ...digestsFromEntry(s) });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
@@ -431,7 +447,7 @@ function parseOnnxFolderFiles(siblings) {
     if (!rfilename) continue;
     if (rfilename.includes('/')) continue; // Root only — cache/, partitioned/ usw. raus
     if (ONNX_FOLDER_SKIP_RE.test(rfilename)) continue;
-    out.push({ name: path.basename(rfilename), repoPath: rfilename, size: bytesFromSizeEntry(s) });
+    out.push({ name: path.basename(rfilename), repoPath: rfilename, size: bytesFromSizeEntry(s), ...digestsFromEntry(s) });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
@@ -568,7 +584,8 @@ async function downloadModel({ repo, file, modelsDir, onProgress = () => {}, dow
     const url = `${HF}/${repo}/resolve/main/${encodePath(part)}?download=true`;
     const finalPath = path.join(folder, path.basename(part));
     const partPath = `${finalPath}.part`;
-    const size = (info.allFiles.find((f) => f.name === part) || {}).size || 0;
+    const meta = info.allFiles.find((f) => f.name === part) || {};
+    const size = meta.size || 0;
     onProgress({
       phase: 'download', downloadId, repo, file: part, parts,
       received: 0, fileTotal: size, doneBytes, totalBytes: totalExpected, percent: totalExpected ? (doneBytes / totalExpected) * 100 : null,
@@ -580,16 +597,16 @@ async function downloadModel({ repo, file, modelsDir, onProgress = () => {}, dow
         percent: totalExpected ? Math.min(100, ((doneBytes + p.received) / totalExpected) * 100) : p.percent,
       });
     });
-    if (res.alreadyComplete || (res.bytes && size && res.bytes === size)) {
-      try { await fsp.rename(partPath, finalPath); } catch { /* existiert schon */ }
-    } else if (size && res.bytes !== size) {
+    // Größe zuerst (billig), dann zwingend der Inhalts-Hash: eine gleich große,
+    // aber inhaltlich andere GGUF-Datei darf nicht als Modell durchgehen.
+    if (!res.alreadyComplete && size && res.bytes !== size) {
       throw new Error(i18n.t('error.downloadIncomplete', {
         got: (res.bytes / 1073741824).toFixed(2),
         expected: (size / 1073741824).toFixed(2),
       }));
-    } else {
-      try { await fsp.rename(partPath, finalPath); } catch { /* ignore */ }
     }
+    await verifyDownload(partPath, meta, part);
+    try { await fsp.rename(partPath, finalPath); } catch { /* existiert schon */ }
     doneBytes += size || (fs.existsSync(finalPath) ? fs.statSync(finalPath).size : 0);
   }
   onProgress({ phase: 'done', downloadId, repo, file, percent: 100, doneBytes, totalBytes: totalExpected });
@@ -648,6 +665,9 @@ async function downloadOnnxModel({ repo, onnxSub, modelsDir, onProgress = () => 
         file: f.name, got: (got / 1048576).toFixed(1), expected: (f.size / 1048576).toFixed(1),
       }));
     }
+    // Gleiche Integritätspflicht wie bei GGUF: Gewichte per sha256, kleine
+    // Config-Dateien per Git-Blob-SHA1 (blobId).
+    await verifyDownload(dest, f, f.name);
     doneBytes += f.size || got || 0;
   }
 

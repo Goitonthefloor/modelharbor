@@ -505,6 +505,30 @@
     'error.downloadTimeout': { de: 'Zeitüberschreitung beim Download', en: 'Timeout during download' },
     'error.fileNotInRepo': { de: 'Datei {file} wurde im Repo nicht gefunden', en: 'File {file} was not found in the repo' },
     'error.invalidPath': { de: 'Ungültiger Pfad', en: 'Invalid path' },
+    'error.digestMissing': {
+      de: 'Keine Prüfsumme für {file} verfügbar — Download abgelehnt (wird nicht entpackt oder gestartet).',
+      en: 'No checksum available for {file} — download rejected (not extracted or started).',
+    },
+    'error.digestMismatch': {
+      de: 'Prüfsumme von {file} stimmt nicht — Datei verworfen. Bitte erneut herunterladen.',
+      en: 'Checksum mismatch for {file} — file discarded. Please download again.',
+    },
+    'error.archiveTooLarge': {
+      de: 'Archiv überschreitet das Limit von {limit} entpackter Daten — Entpacken abgebrochen.',
+      en: 'Archive exceeds the {limit} unpacked-size limit — extraction aborted.',
+    },
+    'error.archiveTooManyEntries': {
+      de: 'Archiv enthält mehr als {max} Einträge — Entpacken abgebrochen.',
+      en: 'Archive contains more than {max} entries — extraction aborted.',
+    },
+    'error.archiveUnsupportedMethod': {
+      de: 'Nicht unterstützte ZIP-Kompressionsmethode ({method}) — Archiv abgelehnt.',
+      en: 'Unsupported ZIP compression method ({method}) — archive rejected.',
+    },
+    'error.untrustedSender': {
+      de: 'IPC-Aufruf aus einer nicht vertrauenswürdigen Quelle abgelehnt.',
+      en: 'IPC call from an untrusted source rejected.',
+    },
     'error.externalModelDelete': {
       de: 'Modelle aus zusätzlichen Ordnern werden hier nicht gelöscht — bitte im ursprünglichen Ordner entfernen.',
       en: 'Models from additional folders are not deleted here — remove them in their original folder.',
