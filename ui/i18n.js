@@ -467,7 +467,8 @@
       en: 'Port {port} is already in use. Please pick another port in the Server tab.',
     },
     'error.onnxBackendMissing': { de: 'ONNX-Backend (Python-Venv) ist nicht installiert. Installiere es in der Einrichtung.', en: 'ONNX backend (Python venv) is not installed. Install it in Setup.' },
-    'error.onnxPythonMissing': { de: 'ONNX-Backend braucht Python 3.10–3.12 — konnte auch Python 3.12 (uv) nicht installieren.', en: 'ONNX backend requires Python 3.10–3.12 — installing Python 3.12 (uv) failed too.' },
+    'error.onnxPythonMissing': { de: 'ONNX-Backend braucht Python 3.11–3.12 — konnte auch Python 3.12 (uv) nicht installieren.', en: 'ONNX backend requires Python 3.11–3.12 — installing Python 3.12 (uv) failed too.' },
+    'error.onnxIntelMacUnsupported': { de: 'Das ONNX-Backend braucht einen Apple-Silicon-Mac. Für Intel-Macs veröffentlicht onnxruntime-genai keine Pakete mehr — nutze dort das llama.cpp-Backend.', en: 'The ONNX backend requires an Apple Silicon Mac. onnxruntime-genai no longer publishes packages for Intel Macs — use the llama.cpp backend there.' },
     'error.onnxSubMissing': { de: '{repo}: kein ONNX-Unterordner (onnxSub) angegeben.', en: '{repo}: no ONNX subfolder (onnxSub) given.' },
     'error.onnxFilesMissing': { de: '{repo}: im Ordner {sub} wurden keine ONNX-Modelldateien gefunden.', en: '{repo}: no ONNX model files found in folder {sub}.' },
     'error.onnxDownloadIncomplete': {

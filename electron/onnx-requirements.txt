@@ -1,0 +1,58 @@
+# ONNX-Backend: gepinnte, hash-verifizierte Installation (--require-hashes).
+# Erzeugt aus der uv-Auflösung für Python 3.11 (Floor) und den PyPI-Wheel-Hashes.
+# Support-Matrix: Linux x86_64/aarch64, Windows x64/arm64, macOS arm64 (14+).
+# Python 3.11 oder 3.12. Intel-Mac hat keine onnxruntime-genai-Wheels mehr.
+# Änderungen nur bewusst: Version + Hashes gemeinsam aktualisieren.
+
+flatbuffers==25.12.19 \
+    --hash=sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4
+
+numpy==2.4.6 \
+    --hash=sha256:110f8b71aacb688ec69062bb7f6938a0f8acb01b7c1c4beb453c65b6d234584d \
+    --hash=sha256:4cfe66903cc32a9921a6733d96b19bb6abf310397581bbad89c228f5abaf0ee8 \
+    --hash=sha256:0ab0a9c4ffb1a6d95ef519fe4247dba8eb6b18ad93999f76b7f657039acabd47 \
+    --hash=sha256:89cd468399cfd2504718f0ba50e410dca55a170b61a02ad92bb18c8a65186e93 \
+    --hash=sha256:1e254a00cdf42b1e4d5b3d68d33af63268d41340d8885df2ab6470f2e1500147 \
+    --hash=sha256:ed9749eef4cbd126da3dc1d6bcb3a57f5eb7ac6a6484146bdbf743f552dfc577 \
+    --hash=sha256:ebfb099f8dcf083deef3ac1ca4c1503f387cf76296fcb3816b66f5ecb5f54fdb \
+    --hash=sha256:3213d622a0283a39a93d188f3cf72b26862df52fbb4ca3697f51705016523d41 \
+    --hash=sha256:5f9fb9157b4ce2971008323afe46053787b526ef624fea915b261468a8421a0f \
+    --hash=sha256:90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853 \
+    --hash=sha256:d8e8286dd7cea7895157318d1b91cdacac64c479f3cbc8dce548331728484751 \
+    --hash=sha256:4081eb135ac24158bd51cdfbef16f1c64df7063b1143f24731387137c092bec8 \
+    --hash=sha256:d6da64deb6b8ed903e7560180a92f2d804ee1ba5eeb849ac2748b8c1aba1f6d7 \
+    --hash=sha256:68a5124b13fa6cc2086764a20005d30bc0548146f7f5322f02fce212ca14317f \
+    --hash=sha256:5dbbdb29840ca3d91ee0fece42fc29278886d908280bfec0a5846c6f901a3eb0 \
+    --hash=sha256:8ad03c0965fb3c692200e74d458ca28c1dbb4ce96f9a479a8aa041ad5fabca02 \
+    --hash=sha256:2803abfebfc990042cd494d8ce2d5f82e9d847af6d35ec486923aa19dbad5e73
+
+onnxruntime==1.32.0 \
+    --hash=sha256:366b9e53d07812cc5c92822cecf7563b76a8a0f32ba3bb8dd232a206ac3bcb6c \
+    --hash=sha256:2303372a85299b6757b0e11e1cbf13e410ddf7e10c37f4b37e99d1c90e7daf7c \
+    --hash=sha256:5a34fc4dfeb5a7b4a74c95dcba1e773d722abda720b474edf1b0c419dc6d163d \
+    --hash=sha256:d7e0c45cc5f456ad7805e6dd256a7662736cda9c2fd17becae194eb3c2f6df72 \
+    --hash=sha256:23361cdf98afac352d10aa7d9e0a10ceaeb02d38430fb693c6eff370196db62d \
+    --hash=sha256:d52510bbbcc880c13b826f7d75cdf33ac5cf0bb864d960000fc29ce73f0cb83e \
+    --hash=sha256:e36c187006e7a7c8b8d6d57f1a209dd63f52430dca6c282b177718ad6b841054 \
+    --hash=sha256:99e1074c4b2197accd5073052a465361be17b89c093b8ffb6e6bd8f986c52df8 \
+    --hash=sha256:efe7456952c243a05a53d5b8732953625144642c2f3989094277f6217f0c0c40 \
+    --hash=sha256:64d394c69d561af3efd4d4f49dcac8f11d0ce135a20701c16d53b74056cd4cf8
+
+onnxruntime-genai==0.20.0 \
+    --hash=sha256:c292ec0be85e5c379d15d4c145ffdf6c5668e8d82d8a267123b35fc84e114c00 \
+    --hash=sha256:c40dc5114e2a7968bcb6a499e22d8540701c9c1f44b637b2f5c7fb0790a68ea7 \
+    --hash=sha256:1fe6a73ad778b108e4688f8da919120bfd40f2bee9ec64a256d793112104a07e \
+    --hash=sha256:a5e92fea0c455132c44bd133864ce9e42baf4adb456942c2a8f6500c15e0d35a \
+    --hash=sha256:a58998e881564539d3e8ed67bd7b48e091c583c62333241458cc08d06235ee16 \
+    --hash=sha256:7732173c0736c45ccbe3f11ba0a8b629f94965e90e11599650a6cea4f4ef4d54 \
+    --hash=sha256:2bdb673673e448bcb0fa45ae6055d81502f51e8bd82256cfe69560fcf52981a3 \
+    --hash=sha256:2eed95baa10521bbd000591e3646302ade7afef7bafa28b58c590896fec1edee \
+    --hash=sha256:e44c43a3fb3223e39c17aff9a7c9ae26ab7d49a67b039f16b99c606ed6c46331 \
+    --hash=sha256:ef44666617be0029c41d905066dee158342d9c7c9e8733d9b77815a10979b692
+
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+
+protobuf==7.36.2 \
+    --hash=sha256:bdb3a345d48db958e6ce1f18e508beb0cc981d64f24088427549c866cd039f1e
+

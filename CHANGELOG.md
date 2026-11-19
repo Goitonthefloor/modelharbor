@@ -2,6 +2,47 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.7.4] - 2026-11-19
+
+### Security
+
+- **ONNX-Bootstrap installiert nur noch aus einem Hash-Lock (CWE-494 / CWE-1357):** Statt
+  `pip install onnxruntime-genai` (löst auf „was gerade neu ist" auf) installiert das Backend
+  jetzt ausschliesslich aus `electron/onnx-requirements.txt` — exakte Versionen plus SHA256
+  aller passenden Wheels, mit `--require-hashes` für **pip und uv pip**. Gepinnt sind
+  onnxruntime-genai 0.20.0, onnxruntime 1.32.0, numpy 2.4.6, flatbuffers 25.12.19,
+  packaging 26.3 und protobuf 7.36.2 (die vollständige transitiven Closure, per uv aufgelöst).
+  Die Lock-Datei wird beim Installieren aus dem asar ins echte Dateisystem kopiert, weil
+  pip/uv aus einem asar nicht lesen können.
+  **Echt verifiziert:** Installation mit Python 3.12 über pip *und* über uv erfolgreich
+  (Import von onnxruntime_genai/onnxruntime/numpy geprüft); werden die Hashes verfälscht,
+  bricht die Installation ab („THESE PACKAGES DO NOT MATCH THE HASHES FROM THE REQUIREMENTS
+  FILE"). Ein einzelner verfälschter Hash reicht nicht — pip prüft das ausgewählte Wheel
+  gegen alle gelisteten Hashes; die Gegenprobe verfälscht deshalb den ganzen Block.
+- **Python-Untergrenze 3.11:** onnxruntime-genai veröffentlicht keine cp310-Wheels mehr.
+  `pickSystemPython` akzeptiert nur 3.11 und 3.12; ein älteres oder neueres System-Python
+  fällt auf den uv-Pfad zurück. Die Bereichsentscheidung ist eine reine Funktion und getestet.
+- **Interpreter exakt gepinnt:** `uv python install` bekommt einen exakten Patch (3.12.13)
+  statt `3.12`, damit nicht still auf einen neuen Build gewechselt wird.
+- **Intel-Mac wird klar abgelehnt:** onnxruntime-genai hat keine macOS-x86_64-Wheels mehr.
+  Statt eines kryptischen Installationsfehlers gibt es eine eigene Meldung mit dem Hinweis
+  auf das llama.cpp-Backend. Unterstützt sind Linux x86_64/aarch64, Windows x64/arm64 und
+  macOS arm64 (14+), jeweils Python 3.11 oder 3.12.
+
+### Known limitations
+
+- Das CPython-Archiv selbst wird **nicht** app-seitig gehasht: uv zeigt im verbose-Log
+  keinen Verifikationsschritt, und der Pin allein ersetzt keinen Digest. Vertrauensanker
+  für den Interpreter bleibt damit astrals Release-Infrastruktur (uv selbst wird per
+  Release-Digest geprüft). Die Wheels — also der Code, der die Inferenz ausführt — sind
+  vollständig hash-gelockt. In Issue #2 dokumentiert.
+
+### Added
+
+- 6 Regressionstests: unterstützter Python-Bereich, Installationsargv mit `--require-hashes`
+  für beide Zweige (und ohne bloßen Paketnamen), exakter Interpreter-Pin, Form und
+  Abdeckung der Lock-Datei. Suite: **180 Tests**.
+
 ## [1.7.3] - 2026-11-19
 
 ### Fixed

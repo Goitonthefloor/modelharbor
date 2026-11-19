@@ -608,6 +608,37 @@ const UV_ASSETS = {
   darwin: { x64: 'uv-x86_64-apple-darwin.tar.gz', arm64: 'uv-aarch64-apple-darwin.tar.gz' },
 };
 
+/* ------------------- ONNX-Bootstrap: Pins + Hash-Lock ------------------- */
+
+/** Exakter CPython-Patch für den uv-Pfad (kein stiller Drift auf neue Builds). */
+const ONNX_PYTHON_PIN = '3.12.13';
+/** Mitgelieferte Lock-Datei: exakte Versionen plus SHA256 aller passenden Wheels. */
+const ONNX_REQUIREMENTS = 'onnx-requirements.txt';
+const ONNX_PYTHON_MIN = 3.11;
+const ONNX_PYTHON_MAX_EXCLUSIVE = 3.13;
+
+/**
+ * Unterstützter System-Python-Bereich. Untergrenze 3.11, weil onnxruntime-genai
+ * keine cp310-Wheels mehr veröffentlicht; Obergrenze 3.13 (exklusiv), weil der
+ * Lock nur cp311/cp312-Hashes führt. Ältere/neuere System-Python fallen auf den
+ * uv-Pfad mit ONNX_PYTHON_PIN zurück.
+ */
+function isSupportedOnnxPython(ver) {
+  return Number.isFinite(ver) && ver >= ONNX_PYTHON_MIN && ver < ONNX_PYTHON_MAX_EXCLUSIVE;
+}
+
+/**
+ * Installationskommando für das ONNX-Backend. Immer --require-hashes gegen die
+ * mitgelieferte Lock-Datei — nie ein bloßer Paketname, der auf "was gerade neu
+ * ist" auflöst. Rein funktional, damit die Sicherheitseigenschaft testbar ist.
+ */
+function onnxInstallCommand({ useUv, uvPath, venvPip, venvPython, requirementsPath }) {
+  if (useUv) {
+    return { exe: uvPath, args: ['pip', 'install', '--python', venvPython, '--require-hashes', '-r', requirementsPath] };
+  }
+  return { exe: venvPip, args: ['install', '-q', '--require-hashes', '-r', requirementsPath] };
+}
+
 /** Passender uv-Release-Assetname (rein funktional, testbar). */
 function uvAssetFor(platform, arch) {
   const byArch = UV_ASSETS[platform];
@@ -681,14 +712,15 @@ async function ensureUv(installRoot, onProgress = () => {}) {
 /**
  * Baut das ONNX-Backend als Python-Venv mit onnxruntime-genai.
  * Kein llama.cpp-Asset-Download — das venv selbst ist das "Backend".
- * Bevorzugt ein System-Python 3.10–3.12; fehlt es, wird Python 3.12 über
+ * Bevorzugt ein System-Python 3.11–3.12; fehlt es, wird ONNX_PYTHON_PIN über
  * astral/uv heruntergeladen und installiert (keine System-Abhängigkeit mehr).
+ * Die Untergrenze ist 3.11, weil onnxruntime-genai keine cp310-Wheels mehr hat.
  */
 async function pickSystemPython() {
   const win = process.platform === 'win32';
   const candidates = win
-    ? ['py -3.12', 'py -3.11', 'py -3.10', 'python3.12', 'python']
-    : ['python3.12', 'python3.11', 'python3.10', 'python3'];
+    ? ['py -3.12', 'py -3.11', 'python3.12', 'python']
+    : ['python3.12', 'python3.11', 'python3'];
   const { spawnSync } = require('child_process');
   for (const c of candidates) {
     const [exe, ...rest] = c.split(' ');
@@ -698,7 +730,7 @@ async function pickSystemPython() {
     const out = `${r.stdout || ''}${r.stderr || ''}`;
     const m = out.match(/(\d+)\.(\d+)/);
     const ver = m ? Number(`${m[1]}.${m[2]}`) : 0;
-    if (ver >= 3.10 && ver < 3.13) return c;
+    if (isSupportedOnnxPython(ver)) return c;
   }
   return null; // kein System-Python — installOnnxBackend nutzt dann uv
 }
@@ -712,7 +744,16 @@ async function installOnnxBackend(backendId, { installRoot, onProgress = () => {
   const venvPython = path.join(venvDir, bin, isWin ? 'python.exe' : 'python');
   const venvPip = path.join(venvDir, bin, isWin ? 'pip.exe' : 'pip');
 
+  // onnxruntime-genai veröffentlicht keine macOS-x86_64-Wheels mehr: klar melden
+  // statt einen Installationsfehler zu produzieren, der wie ein Netzwerkproblem aussieht.
+  if (process.platform === 'darwin' && process.arch === 'x64') {
+    throw new Error(i18n.t('error.onnxIntelMacUnsupported'));
+  }
   await fsp.mkdir(targetDir, { recursive: true });
+  // Die Lock-Datei liegt im asar; pip/uv können daraus nicht lesen. Einmal ins
+  // echte Dateisystem kopieren und nur diesen Pfad an den Installer geben.
+  const requirementsPath = path.join(targetDir, ONNX_REQUIREMENTS);
+  await fsp.writeFile(requirementsPath, await fsp.readFile(path.join(__dirname, ONNX_REQUIREMENTS), 'utf8'), 'utf8');
   if (!fs.existsSync(venvPython)) {
     const sysPy = await pickSystemPython();
     if (sysPy) {
@@ -720,7 +761,7 @@ async function installOnnxBackend(backendId, { installRoot, onProgress = () => {
       const [exe, ...rest] = sysPy.split(' ');
       execFileSync(exe, [...rest, '-m', 'venv', venvDir], { stdio: 'ignore', windowsHide: true });
     } else {
-      // Kein System-Python 3.10–3.12: uv holen und Python 3.12 mitinstallieren.
+      // Kein unterstütztes System-Python: uv holen und ONNX_PYTHON_PIN mitinstallieren.
       let uv = null;
       try {
         uv = await ensureUv(installRoot, onProgress);
@@ -728,20 +769,18 @@ async function installOnnxBackend(backendId, { installRoot, onProgress = () => {
         throw new Error(`${i18n.t('error.onnxPythonMissing')} (${e.message})`);
       }
       onProgress({ phase: 'download', backend: 'onnx', file: 'Python 3.12 (uv)', percent: 30 });
-      execFileSync(uv, ['python', 'install', '3.12'], { stdio: 'ignore', windowsHide: true });
+      execFileSync(uv, ['python', 'install', ONNX_PYTHON_PIN], { stdio: 'ignore', windowsHide: true });
       onProgress({ phase: 'download', backend: 'onnx', file: 'Python-Venv anlegen', percent: 40 });
-      execFileSync(uv, ['venv', '--python', '3.12', venvDir], { stdio: 'ignore', windowsHide: true });
+      execFileSync(uv, ['venv', '--python', ONNX_PYTHON_PIN, venvDir], { stdio: 'ignore', windowsHide: true });
     }
   }
   onProgress({ phase: 'download', backend: 'onnx', file: 'onnxruntime-genai', percent: 55 });
-  if (fs.existsSync(venvPip)) {
-    // klassisches venv (System-Python) — pip ist vorhanden
-    execFileSync(venvPip, ['install', '-q', 'onnxruntime-genai'], { stdio: 'ignore', windowsHide: true });
-  } else {
-    // uv-venv hat kein pip — Installation über uv
-    const uv = await ensureUv(installRoot, onProgress);
-    execFileSync(uv, ['pip', 'install', '--python', venvPython, 'onnxruntime-genai'], { stdio: 'ignore', windowsHide: true });
-  }
+  // Klassisches venv (System-Python) hat pip; ein uv-venv nicht — dann uv pip.
+  // Beide Wege installieren ausschliesslich aus dem Hash-Lock.
+  const useUv = !fs.existsSync(venvPip);
+  const uvPath = useUv ? await ensureUv(installRoot, onProgress) : null;
+  const cmd = onnxInstallCommand({ useUv, uvPath, venvPip, venvPython, requirementsPath });
+  execFileSync(cmd.exe, cmd.args, { stdio: 'ignore', windowsHide: true });
   onProgress({ phase: 'extract', backend: 'onnx', percent: 100 });
 
   const manifest = {
@@ -774,4 +813,8 @@ module.exports = {
   ARCHIVE_MAX_ENTRIES,
   uvAssetFor,
   ensureUv,
+  isSupportedOnnxPython,
+  onnxInstallCommand,
+  ONNX_PYTHON_PIN,
+  ONNX_REQUIREMENTS,
 };

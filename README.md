@@ -95,12 +95,12 @@ The ready-made packages live in `dist/`:
 
 | Platform | File | Status |
 |---|---|---|
-| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.7.3.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
-| Linux (x64) | `dist/ModelHarbor-1.7.3.AppImage` | built, start-tested (126 MB) |
+| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.7.4.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
+| Linux (x64) | `dist/ModelHarbor-1.7.4.AppImage` | built, start-tested (126 MB) |
 | macOS (Apple Silicon / Intel) | `ModelHarbor-1.2.2-arm64.dmg` / `-x64.dmg` | build with `npm run dist:mac` (on a Mac) |
 
 Both current packages are attached to the [GitHub release](https://github.com/Goitonthefloor/modelharbor/releases/latest)
-as `ModelHarbor-1.7.3.AppImage` and `ModelHarbor-Setup-1.7.3.exe`.
+as `ModelHarbor-1.7.4.AppImage` and `ModelHarbor-Setup-1.7.4.exe`.
 
 On first start the app walks you through the setup: check hardware, install a backend,
 pick a model.
