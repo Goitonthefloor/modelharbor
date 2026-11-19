@@ -13,11 +13,16 @@ CLI:
   --ep <cpu|cuda|dml|openvino>       (default: cpu; andere EP nur wenn installiert)
   --max-tokens <n>                   (default 2048)
 
+Der API-Key kommt aus der Env-Variable MH_ONNX_API_KEY (nicht aus argv):
+/proc/<pid>/cmdline ist fuer alle lokalen Benutzer lesbar, die Env nur
+fuer den Eigentuemer. ModelHarbor setzt sie beim Start des Kindprozesses.
+
 Abhaengigkeit: onnxruntime-genai im selben Python (venv), siehe
 electron/backends.js (onnx-Backend).
 """
 import argparse
 import json
+import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -229,12 +234,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-dir", required=True)
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--api-key", default="")
     ap.add_argument("--cors-origins", default="*")
     ap.add_argument("--port", type=int, default=9931)
     ap.add_argument("--ep", default="cpu")
     ap.add_argument("--max-tokens", type=int, default=2048)
     ARGS = ap.parse_args()
+    # Key nur ueber Env: die Kommandozeile ist fuer andere lokale Benutzer lesbar.
+    ARGS.api_key = os.environ.get("MH_ONNX_API_KEY", "")
     log("Loading OGA model from", ARGS.model_dir, "ep=", ARGS.ep)
     global OG, MODEL, TOK
     try:

@@ -2,6 +2,44 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.7.3] - 2026-11-19
+
+### Fixed
+
+- **API-Key nicht mehr in der Kommandozeile (Security-Review, CWE-214):** Der Key reist jetzt über
+  die Umgebung des Kindprozesses — LLAMA_API_KEY für llama.cpp, MH_ONNX_API_KEY für den
+  app-eigenen ONNX-Server — statt als argv-Argument. Auf Linux ist /proc/<pid>/cmdline für alle
+  lokalen Benutzer lesbar, die Env nur für den Eigentümer. Mit dem echten llama-server (b12373)
+  gegen ein kleines Modell verifiziert: Key nicht in cmdline, Key in der Kind-Env, ohne Key 401,
+  mit Key 200 samt Antwort, falscher Key 401.
+- **API-Key nicht mehr in Logs, UI und Fehlermeldungen (CWE-532):** Weil der Key nicht mehr in
+  argv steht, enthalten die Start-Logzeile, das Debug-Log, die UI-Log-Anzeige und der
+  Health-Fehler-Tail ihn nicht mehr. Die Zusage in logger.js („Es werden niemals
+  Secrets/Tokens/API-Keys geloggt") gilt damit wieder. Das Feld argv im Server-State wurde
+  entfernt — es hatte keinen Konsumenten und war eine tote Expositionsfläche.
+- **ONNX-Start ohne overrides-Objekt crashte:** opts.overrides.maxTokens und opts.overrides.ep
+  umgingen den Default {} und warfen einen TypeError, wenn kein overrides mitgegeben wurde.
+  Beide nutzen jetzt die destructured Variable (Geschwisterpfad gleich mitgeprüft).
+
+### Changed
+
+- onnx_server.py liest den Key aus MH_ONNX_API_KEY; die gleichnamige CLI-Option ist entfernt
+  (kein kompatibler Alt-Pfad).
+
+### Known limitations
+
+- Der ONNX-Bootstrap installiert onnxruntime-genai und CPython weiterhin ohne Versions-Pin und
+  ohne Hash-Lock. Das ist eine bestehende Lücke (nicht durch dieses Release eingeführt). Ein Pin
+  auf die neueste Version würde den System-Python-3.10-Pfad brechen, weil es dafür keine
+  cp310-Wheels mehr gibt; die Entscheidung über Python-Untergrenze plus Hash-Lock ist als
+  GitHub-Issue dokumentiert.
+
+### Added
+
+- Regressionstests: Key in der Kind-Env statt in argv (llama und ONNX, gegen ein Schein-Backend
+  das die echte argv und den Env-Wert schreibt), und kein Key-Wert in Logzeilen, State-Feldern
+  oder Fehlertexten. Suite: **174 Tests**.
+
 ## [1.7.2] - 2026-11-19
 
 ### Fixed

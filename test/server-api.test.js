@@ -200,9 +200,12 @@ test('buildArgs: LAN-Schalter bindet an 0.0.0.0, sonst nur lokal', () => {
   assert.equal(val(argsWith({ host: '0.0.0.0', port: 1234 }), '--port'), '1234');
 });
 
-test('buildArgs: API-Key, CORS und parallele Slots', () => {
+test('buildArgs: Key NICHT in argv, CORS und parallele Slots', () => {
   const args = argsWith({ host: '0.0.0.0', port: 1234, apiKey: 'mh-abc', cors: false, parallel: 8 });
-  assert.equal(val(args, '--api-key'), 'mh-abc');
+  // Der Key reist per Env (LLAMA_API_KEY), nicht per Kommandozeile:
+  // /proc/<pid>/cmdline ist fuer alle lokalen Benutzer lesbar.
+  assert.ok(!args.includes('mh-abc'), 'Key-Wert darf nicht in argv stehen');
+  assert.ok(!args.includes('--api-key'), 'Key-Flag darf nicht in argv stehen');
   // llama.cpp hat kein simples --cors: CORS läuft über --cors-origins
   assert.equal(val(args, '--cors-origins'), 'localhost');
   assert.ok(!args.includes('--cors'));
@@ -211,10 +214,11 @@ test('buildArgs: API-Key, CORS und parallele Slots', () => {
 });
 
 
-test('buildArgs: Key-Pflicht — CORS/Slots bleiben optional', () => {
+test('buildArgs: Key-Pflicht heisst Env-Transport — CORS/Slots bleiben optional', () => {
   const cfg = sc.ensureKey({});
   const args = argsWith({ host: '127.0.0.1', port: 1234, cors: true, apiKey: cfg.apiKey });
-  assert.equal(val(args, '--api-key'), cfg.apiKey, 'Key steht immer in der Kommandozeile');
+  assert.ok(!args.includes(cfg.apiKey), 'Key steht NIE in der Kommandozeile');
+  assert.ok(!args.includes('--api-key'));
   assert.ok(!args.includes('--cors-origins'));   // Standard * = alle Origins erlaubt
   assert.ok(!args.includes('--parallel'));
   assert.equal(val(args, '--host'), '127.0.0.1');
@@ -229,9 +233,9 @@ test('buildArgs: Server-Flags und Modell-Einstellungen kombiniert', () => {
   assert.equal(val(args, '--flash-attn'), 'on');
   assert.equal(val(args, '--port'), '4321');
   assert.equal(val(args, '--host'), '0.0.0.0');
-  assert.equal(val(args, '--api-key'), 'mh-k');
+  assert.ok(!args.includes('mh-k'), 'Key nicht in argv');
   assert.equal(val(args, '--parallel'), '2');
-  for (const f of ['--host', '--port', '--api-key', '--parallel', '--ctx-size', '--cache-type-k']) {
+  for (const f of ['--host', '--port', '--parallel', '--ctx-size', '--cache-type-k']) {
     assert.equal(args.filter((a) => a === f).length, 1, `${f} darf nur einmal vorkommen`);
   }
 });
@@ -296,4 +300,91 @@ test('startServer: startet NIE ohne API-Key — mit Key läuft er an der Prüfun
     () => startServer({ serverPath, modelPath: onnxDir, presetId: 'balanced', serverConfig: cfg }),
     /ONNX/i,
   );
+});
+
+/* ---------------- Key-Transport: Env statt argv, Log-Invariante ---------------- */
+
+function freePort() {
+  return new Promise((r) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => { const port = srv.address().port; srv.close(() => r(port)); });
+  });
+}
+
+/** Schein-Backend: schreibt die echte argv und den Wert der Key-Env-Variable. */
+function fakeBackend(file, argvFile, keyFile, envName) {
+  const script = '#!/bin/sh\n'
+    + "printf '%s\\n' \"$@\" > " + argvFile + '\n'
+    + "printf '%s' \"$" + envName + "\" > " + keyFile + '\n'
+    + 'exit 3\n';
+  fs.writeFileSync(file, script);
+  fs.chmodSync(file, 0o755);
+}
+
+async function waitFile(f, ms = 5000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8');
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error('Datei nicht entstanden: ' + f);
+}
+
+test('startServer (llama): Key in der Kind-Env, nicht in argv; kein Log/State/Fehler leakt ihn', async (t) => {
+  const dir = tmpDir(t);
+  const serverPath = path.join(dir, 'llama-server');
+  const modelPath = path.join(dir, 'm.gguf');
+  const argvFile = path.join(dir, 'argv.txt');
+  const keyFile = path.join(dir, 'key.txt');
+  fakeBackend(serverPath, argvFile, keyFile, 'LLAMA_API_KEY');
+  fs.writeFileSync(modelPath, 'GGUF');
+  const srv = require('../electron/server.js');
+  const cfg = { ...sc.ensureKey({}), port: await freePort() };
+  let err = null;
+  try {
+    await srv.startServer({ serverPath, modelPath, presetId: 'balanced', serverConfig: cfg });
+  } catch (e) { err = e; }
+  assert.ok(err, 'Schein-Backend beendet sich sofort -> Start muss scheitern');
+
+  const argv = (await waitFile(argvFile)).split('\n').filter(Boolean);
+  assert.ok(!argv.includes(cfg.apiKey), 'Key-Wert darf nicht in der Prozess-argv stehen');
+  assert.ok(!argv.includes('--api-key'), 'Key-Flag darf nicht in der Prozess-argv stehen');
+  assert.equal(await waitFile(keyFile), cfg.apiKey, 'Key kommt in der Env des Kindprozesses an');
+
+  // Log-Invariante aus logger.js: niemals Secrets in Logs, State oder Fehlertext.
+  const st = srv.getState();
+  assert.equal(st.argv, undefined, 'argv wird nicht mehr im State exponiert');
+  for (const l of st.logs) {
+    assert.ok(!String(l.line).includes(cfg.apiKey), 'Logzeile leakt den Key');
+  }
+  assert.ok(!String(err.message).includes(cfg.apiKey), 'Fehlertext leakt den Key');
+  for (const [k, v] of Object.entries(st)) {
+    if (k === 'apiKey' || k === 'logs') continue;  // apiKey ist die beabsichtigte Anzeige im Server-Tab
+    assert.ok(!JSON.stringify(v).includes(cfg.apiKey), 'State-Feld leakt den Key: ' + k);
+  }
+});
+
+test('startServer (ONNX): Key in der Kind-Env, nicht in argv; Logs bleiben key-frei', async (t) => {
+  const dir = tmpDir(t);
+  const py = path.join(dir, 'python');
+  const modelDir = path.join(dir, 'onnx-model');
+  fs.mkdirSync(modelDir);
+  fs.writeFileSync(path.join(modelDir, 'genai_config.json'), '{}');
+  const argvFile = path.join(dir, 'argv.txt');
+  const keyFile = path.join(dir, 'key.txt');
+  fakeBackend(py, argvFile, keyFile, 'MH_ONNX_API_KEY');
+  const srv = require('../electron/server.js');
+  const cfg = { ...sc.ensureKey({}), port: await freePort() };
+  let err = null;
+  try {
+    await srv.startServer({ serverPath: py, modelPath: modelDir, presetId: 'balanced', serverConfig: cfg, onnxPython: py });
+  } catch (e) { err = e; }
+  assert.ok(err, 'Schein-Backend beendet sich sofort -> Start muss scheitern');
+  const argv = (await waitFile(argvFile)).split('\n').filter(Boolean);
+  assert.ok(!argv.includes(cfg.apiKey), 'ONNX: Key-Wert nicht in argv');
+  assert.ok(!argv.includes('--api-key'), 'ONNX: Key-Flag nicht in argv');
+  assert.equal(await waitFile(keyFile), cfg.apiKey, 'ONNX: Key kommt in der Kind-Env an');
+  for (const l of srv.getState().logs) {
+    assert.ok(!String(l.line).includes(cfg.apiKey), 'ONNX-Logzeile leakt den Key');
+  }
 });

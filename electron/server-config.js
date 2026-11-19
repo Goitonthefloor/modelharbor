@@ -7,8 +7,12 @@
  * Bindung (nur lokal vs. LAN), API-Key, CORS und parallele Slots.
  *
  * Reine Logik (kein Electron), damit direkt testbar. Die Flags sind gegen
- * llama-server b12527 verifiziert: --host, --port, --api-key, --cors-origins,
+ * llama-server b12527/b12373 verifiziert: --host, --port, --cors-origins,
  * --parallel, --alias. Ein simples --cors existiert dort NICHT.
+ *
+ * Der API-Key steht NICHT in der Kommandozeile: /proc/<pid>/cmdline ist fuer
+ * alle lokalen Benutzer lesbar. llama-server liest ihn aus LLAMA_API_KEY,
+ * der app-eigene ONNX-Server aus MH_ONNX_API_KEY (jeweils nur Kind-Env).
  */
 const os = require('os');
 const crypto = require('crypto');

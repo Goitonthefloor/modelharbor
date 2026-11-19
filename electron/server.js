@@ -23,7 +23,6 @@ let state = {
   preset: null,
   startedAt: null,
   error: null,
-  argv: [],
 };
 let logs = [];
 const MAX_LOGS = 500;
@@ -110,7 +109,9 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
   // Server-Zugang für Agenten: API-Key, CORS, parallele Slots.
   // Kein simples --cors in llama.cpp: CORS läuft über --cors-origins
   // (Standard * = alle Origins; „localhost“ = nur same-origin).
-  args.push('--api-key', String(sc.apiKey));
+  // Der Key wandert NICHT in die Kommandozeile: /proc/<pid>/cmdline ist auf
+  // Linux für alle lokalen Benutzer lesbar. llama-server liest ihn aus der
+  // Env-Variable LLAMA_API_KEY (startServer setzt sie nur für den Kindprozess).
   if (sc.cors === false) args.push('--cors-origins', 'localhost');
   if (sc.parallel) args.push('--parallel', String(sc.parallel));
   const cpuCount = (require('os').cpus() || []).length || 4;
@@ -182,23 +183,27 @@ async function startServer(opts) {
       throw new Error(i18n.t('error.onnxBackendMissing'));
     }
     executable = py;
-    const maxTok = Math.max(256, Number(opts.overrides.maxTokens || ctx || 8192));
+    // Key über Env statt argv — der app-eigene ONNX-Server liest MH_ONNX_API_KEY.
+    env.MH_ONNX_API_KEY = sc.apiKey;
+    const maxTok = Math.max(256, Number(overrides.maxTokens || ctx || 8192));
     args = [
       path.join(__dirname, 'onnx_server.py'),
       '--model-dir', modelPath,
       '--host', host,
       '--port', String(port),
-      // Gleiche Zugangsregeln wie beim llama-Server: Key-Pflicht und CORS.
-      '--api-key', String(sc.apiKey),
+      // Gleiche Zugangsregeln wie beim llama-Server: Key-Pflicht (via Env) und CORS.
       '--cors-origins', sc.cors === false ? 'localhost' : '*',
-      '--ep', opts.overrides.ep || 'cpu',
+      '--ep', overrides.ep || 'cpu',
       '--max-tokens', String(maxTok),
     ];
     env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH || '';
+  } else {
+    // Nur der Kindprozess bekommt den Key; process.env bleibt unverändert.
+    env.LLAMA_API_KEY = sc.apiKey;
   }
 
   logs = [];
-  setState({ running: false, starting: true, pid: null, port, host, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1', model: modelPath, preset: presetId, startedAt: null, error: null, argv: args });
+  setState({ running: false, starting: true, pid: null, port, host, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1', model: modelPath, preset: presetId, startedAt: null, error: null });
   logger.debug(`startServer mode=${isOnnx ? 'onnx' : 'llama'} executable=${path.basename(executable)} argv=${args.join(' ')}`);
   pushLog(`Starte: ${path.basename(executable)} ${args.join(' ')}`, 'info');
 
