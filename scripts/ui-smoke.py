@@ -14,6 +14,11 @@ URL = Path(__file__).resolve().parent.parent.joinpath('ui', 'index.html').as_uri
 
 API_MOCK = """
 window.__apiCalls = [];
+window.__srvCfgCalls = [];
+window.__srvCfg = { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4 };
+window.__srvInfo = { ips: [], insecureLan: false, endpoints: [
+  { path: '/v1/chat/completions', method: 'POST' }, { path: '/v1/completions', method: 'POST' },
+  { path: '/v1/models', method: 'GET' }, { path: '/health', method: 'GET' }] };
 window.__settingsCalls = [];
 window.api = {
   info: async () => ({ version: '1.0.0', name: 'ModelHarbor' }),
@@ -26,6 +31,15 @@ window.api = {
     state: async () => ({ running: false }),
     start: async (o) => { window.__apiCalls.push(['start', o]); return { port: 9931, preset: o.preset }; },
     stop: async () => { window.__apiCalls.push(['stop']); return { stopped: true }; },
+    config: async () => ({ config: window.__srvCfg, info: window.__srvInfo }),
+    setConfig: async (p) => {
+      window.__srvCfgCalls.push(p);
+      window.__srvCfg = { ...window.__srvCfg, ...p };
+      window.__srvInfo = { ...window.__srvInfo, ips: window.__srvCfg.lan ? ['192.0.2.50'] : [],
+                           insecureLan: window.__srvCfg.lan && !window.__srvCfg.apiKey };
+      return { config: window.__srvCfg, info: window.__srvInfo };
+    },
+    generateKey: async () => ({ key: 'mh-testkey-0123456789abcdef' }),
   },
   hw: { scan: async () => ({ osName: 'Linux', arch: 'x64', cpuModel: 'Test CPU', cpuCores: 8, totalMemGB: 16, freeMemGB: 10, gpus: [], npus: [], recommendation: { primary: null, candidates: [] } }) },
   models: {
@@ -282,7 +296,7 @@ with sync_playwright() as p:
                calls: window.__settingsCalls.filter(c => c.language) };
     }""")
     check("i18n: Sprachwechsel auf Englisch rendert sofort um",
-          i18n_en["lang"] == "en" and i18n_en["nav"] == ["Chat", "Models", "Setup"]
+          i18n_en["lang"] == "en" and i18n_en["nav"] == ["Chat", "Models", "Server", "Setup"]
           and "Settings" in i18n_en["titles"] and "Your system" in i18n_en["titles"]
           and i18n_en["modelsTitle"] == "Models"
           and i18n_en["hint"] == "Load a model to start chatting"
@@ -296,7 +310,7 @@ with sync_playwright() as p:
       return { lang: document.documentElement.lang, nav, calls: window.__settingsCalls.filter(c => c.language) };
     }""")
     check("i18n: Rueckwechsel auf Deutsch",
-          i18n_back["lang"] == "de" and i18n_back["nav"] == ["Chat", "Modelle", "Einrichtung"]
+          i18n_back["lang"] == "de" and i18n_back["nav"] == ["Chat", "Modelle", "Server", "Einrichtung"]
           and any(c["language"] == "de" for c in i18n_back["calls"]),
           json.dumps(i18n_back, ensure_ascii=False))
 
@@ -543,6 +557,160 @@ with sync_playwright() as p:
           len(empty.get("calls", [])) == 1 and empty["calls"][0][2] == {}
           and empty.get("store", {}) == {},
           json.dumps(empty, ensure_ascii=False))
+
+    # Feature: Server-Tab (API fuer Agenten) inkl. LAN-Schalter
+    nav_order = page.evaluate("() => [...document.querySelectorAll('.nav-item')].map(b => b.dataset.view)")
+    check("Navigation: Server zwischen Modelle und Einrichtung",
+          nav_order == ["chat", "models", "server", "setup"], json.dumps(nav_order))
+
+    page.evaluate("setView('server')")
+    page.wait_for_timeout(500)
+    srv = page.evaluate("""async () => {
+      window.__srvCfgCalls = [];
+      window.api.models.local = async () => ([
+        { id: 'owner__model/model-Q4_K_M.gguf', repo: 'owner/model', file: 'model-Q4_K_M.gguf',
+          sizeLabel: '4.2 GB', path: '/tmp/models/owner__model/model-Q4_K_M.gguf', quant: 'Q4_K_M',
+          external: false, nativeCtx: 40960, kvBaseGB: 2.0, fitCtx: 8192, modelSettings: {}, settingsSummary: '',
+          fit: { verdict: 'gpu', label: 'GPU', detail: 'passt', gpuLayers: 999 } },
+      ]);
+      await refreshServerView();
+      const ids = ['srv-model','srv-preset','srv-start','srv-stop','srv-port','srv-lan','srv-key','srv-cors','srv-parallel','srv-warning','srv-agents','srv-log'];
+      const agents = document.querySelector('#srv-agents').textContent;
+      return {
+        present: ids.every(i => !!document.querySelector('#' + i)),
+        modelOptions: [...document.querySelector('#srv-model').options].map(o => o.value),
+        port: document.querySelector('#srv-port').value,
+        lanChecked: document.querySelector('#srv-lan').checked,
+        warnHidden: document.querySelector('#srv-warning').classList.contains('is-hidden'),
+        hasLocalUrl: agents.includes('http://127.0.0.1:1234/v1'),
+        hasModelName: agents.includes('ModelHarbor'),
+        hasCurl: agents.includes('curl http://127.0.0.1:1234/v1/chat/completions'),
+        hasPython: agents.includes('from openai import OpenAI'),
+        hasJson: agents.includes('"base_url"'),
+        hasEndpoints: agents.includes('/v1/chat/completions') && agents.includes('/health'),
+        status: document.querySelector('#srv-status').textContent,
+        copyButtons: document.querySelectorAll('[data-act="srv-copy"]').length,
+      };
+    }""")
+    check("Server-Tab: Modellwahl, Zugang, Agenten-Karte mit Snippets",
+          srv["present"] and srv["port"] == "1234" and srv["lanChecked"] is False
+          and srv["warnHidden"] is True and srv["hasLocalUrl"] and srv["hasModelName"]
+          and srv["hasCurl"] and srv["hasPython"] and srv["hasJson"] and srv["hasEndpoints"]
+          and srv["copyButtons"] >= 5 and "owner__model/model-Q4_K_M.gguf" in srv["modelOptions"],
+          json.dumps(srv, ensure_ascii=False))
+
+    lan = page.evaluate("""async () => {
+      const el = document.querySelector('#srv-lan');
+      el.checked = true; el.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 350));
+      const agents = document.querySelector('#srv-agents').textContent;
+      return {
+        saved: window.__srvCfgCalls.slice(),
+        warnVisible: !document.querySelector('#srv-warning').classList.contains('is-hidden'),
+        lanUrl: agents.includes('http://192.0.2.50:1234/v1'),
+        curlLan: agents.includes('curl http://192.0.2.50:1234/v1/chat/completions'),
+        noKeyYet: !agents.includes('Authorization'),
+      };
+    }""")
+    check("LAN-Schalter: warnt ohne Key und zeigt die LAN-Adresse",
+          lan["warnVisible"] is True and lan["lanUrl"] and lan["curlLan"] and lan["noKeyYet"]
+          and any(c.get("lan") is True for c in lan["saved"]),
+          json.dumps(lan, ensure_ascii=False))
+
+    key = page.evaluate("""async () => {
+      document.querySelector('[data-act="srv-genkey"]').click();
+      await new Promise(r => setTimeout(r, 400));
+      const agents = document.querySelector('#srv-agents').textContent;
+      return {
+        fieldValue: document.querySelector('#srv-key').value,
+        warnHidden: document.querySelector('#srv-warning').classList.contains('is-hidden'),
+        curlHasAuth: agents.includes('Authorization: Bearer mh-testkey-0123456789abcdef'),
+        jsonHasKey: agents.includes('"api_key": "mh-testkey-0123456789abcdef"'),
+        saved: window.__srvCfgCalls.slice(),
+      };
+    }""")
+    check("Key erzeugen: Warnung weg, Key in curl/Python/JSON",
+          key["fieldValue"].startswith("mh-") and key["warnHidden"] is True
+          and key["curlHasAuth"] and key["jsonHasKey"]
+          and any(c.get("apiKey", "").startswith("mh-") for c in key["saved"]),
+          json.dumps(key, ensure_ascii=False))
+
+    cfg = page.evaluate("""async () => {
+      const port = document.querySelector('#srv-port');
+      port.value = '999999'; port.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 300));
+      const cors = document.querySelector('#srv-cors');
+      cors.checked = false; cors.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 300));
+      const par = document.querySelector('#srv-parallel');
+      par.value = '8'; par.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 300));
+      return { saved: window.__srvCfgCalls.slice(),
+               agents: document.querySelector('#srv-agents').textContent };
+    }""")
+    check("Server-Konfiguration wird gespeichert (Port/CORS/Slots)",
+          any(c.get("port") == 999999 for c in cfg["saved"])
+          and any(c.get("cors") is False for c in cfg["saved"])
+          and any(c.get("parallel") == 8 for c in cfg["saved"]),
+          json.dumps(cfg["saved"], ensure_ascii=False))
+
+    copy = page.evaluate("""async () => {
+      clearToasts();
+      document.querySelector('[data-act="srv-copy"][data-copy-key="localUrl"]').click();
+      await new Promise(r => setTimeout(r, 350));
+      return { toasts: [...document.querySelectorAll('#toast-wrap .toast-msg')].map(e => e.textContent),
+               expected: state.srvCopy.localUrl };
+    }""")
+    check("Kopieren-Button liefert die Base-URL",
+          len(copy["toasts"]) >= 1 and copy["expected"].startswith("http://") and copy["expected"].endswith("/v1"),
+          json.dumps(copy, ensure_ascii=False))
+
+    start = page.evaluate("""async () => {
+      window.__apiCalls = [];
+      document.querySelector('#srv-start').click();
+      await new Promise(r => setTimeout(r, 600));
+      return { calls: window.__apiCalls.filter(c => c[0] === 'start'),
+               view: state.view };
+    }""")
+    started = (start["calls"] or [[None, {}]])[0][1]
+    check("Server starten: nutzt das gewaehlte Modell und bleibt im Server-Tab",
+          started.get("modelPath") == "/tmp/models/owner__model/model-Q4_K_M.gguf"
+          and started.get("modelId") == "owner__model/model-Q4_K_M.gguf"
+          and start["view"] == "server",
+          json.dumps(start, ensure_ascii=False))
+
+    # Enter soll den Fokus im Chatfeld lassen (auch waehrend des Streamens)
+    focus = page.evaluate("""async () => {
+      // Offene modale Dialoge aus frueheren Checks machen den Rest inert -> schliessen
+      document.querySelectorAll('dialog[open]').forEach(d => d.close());
+      setView('chat');
+      state.server.running = true;
+      state.chat.streaming = false;
+      renderChatState();
+      const input = document.querySelector('#input');
+      input.focus();
+      input.value = 'Hallo';
+      const before = document.activeElement === input;
+      // Stream-Zustand: das Feld darf nicht disabled werden (das kostet den Fokus)
+      state.chat.streaming = true;
+      renderChatState();
+      const duringDisabled = input.disabled;
+      const duringFocus = document.activeElement === input;
+      state.chat.streaming = false;
+      renderChatState();
+      return { before, duringDisabled, duringFocus,
+               afterDisabled: input.disabled, afterFocus: document.activeElement === input,
+               diag: { hasFocus: document.hasFocus(),
+                       active: document.activeElement && (document.activeElement.id || document.activeElement.tagName),
+                       dlgOpen: [...document.querySelectorAll('dialog')].filter(d => d.open).map(d => d.id),
+                       viewActive: document.querySelector('#view-chat').classList.contains('is-active'),
+                       display: getComputedStyle(input).display,
+                       inert: !!input.closest('[inert]') } };
+    }""")
+    check("Chat: Enter/Streaming behaelt den Fokus im Textfeld",
+          focus["before"] and focus["duringDisabled"] is False and focus["duringFocus"]
+          and focus["afterDisabled"] is False and focus["afterFocus"],
+          json.dumps(focus))
 
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))

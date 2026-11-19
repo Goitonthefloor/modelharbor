@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('api', {
   server: {
     start: (opts) => ipcRenderer.invoke('server:start', opts),
     stop: () => ipcRenderer.invoke('server:stop'),
+    config: () => ipcRenderer.invoke('server:config'),
+    setConfig: (patch) => ipcRenderer.invoke('server:setConfig', patch),
+    generateKey: () => ipcRenderer.invoke('server:generateKey'),
     state: () => ipcRenderer.invoke('server:state'),
   },
   dialog: {

@@ -107,18 +107,51 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _origin_allowed(self):
+        """'*' erlaubt alles, 'localhost' nur same-origin (wie --cors-origins bei llama.cpp)."""
+        mode = getattr(ARGS, "cors_origins", "*") or "*"
+        origin = self.headers.get("Origin", "")
+        if mode == "*" or not origin:
+            return True
+        return "localhost" in origin
+
+    def _authorized(self):
+        """Ohne konfigurierten Key ist alles offen — mit Key wird er auf /v1/* erzwungen."""
+        key = getattr(ARGS, "api_key", "") or ""
+        if not key:
+            return True
+        return self.headers.get("Authorization", "") == "Bearer " + key
+
+    def _cors_headers(self):
+        mode = getattr(ARGS, "cors_origins", "*") or "*"
+        origin = self.headers.get("Origin", "")
+        if mode == "*":
+            self.send_header("Access-Control-Allow-Origin", "*")
+        elif origin and "localhost" in origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
     def _json(self, code, obj):
         data = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self._cors_headers()
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors_headers()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _health(self):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         body = json.dumps({"ok": True, "engine": "oga"}).encode()
+        self._cors_headers()
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -131,6 +164,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         pth = urlparse(self.path).path
+        if not self._origin_allowed():
+            self._json(403, {"error": {"message": "origin not allowed"}}); return
+        if not self._authorized():
+            self._json(401, {"error": {"message": "invalid or missing API key",
+                                       "type": "invalid_request_error", "code": "invalid_api_key"}}); return
         if pth != "/v1/chat/completions":
             self._json(404, {"error": {"message": "not found"}}); return
         try:
@@ -190,6 +228,9 @@ def main():
     global ARGS
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-dir", required=True)
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--api-key", default="")
+    ap.add_argument("--cors-origins", default="*")
     ap.add_argument("--port", type=int, default=9931)
     ap.add_argument("--ep", default="cpu")
     ap.add_argument("--max-tokens", type=int, default=2048)
@@ -202,7 +243,7 @@ def main():
         log("FATAL: model load failed:", e)
         sys.exit(2)
     log("Model ready.")
-    srv = ThreadingHTTPServer(("127.0.0.1", ARGS.port), Handler)
+    srv = ThreadingHTTPServer((ARGS.host, ARGS.port), Handler)
     log("OGA server on port", ARGS.port)
     srv.serve_forever()
 

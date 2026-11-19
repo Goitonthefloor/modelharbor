@@ -2,6 +2,62 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.7.0] - 2026-11-18
+
+### Added
+
+- **Neuer Menüpunkt „Server"** (zwischen „Modelle" und „Einrichtung"): stellt das geladene Modell
+  als **OpenAI-kompatiblen API-Server für Agenten** bereit — analog zum lokalen Server in LM Studio.
+  Modell und Preset wählen, **Server starten**, fertig.
+- **Agenten-Karte mit Verbindungsdaten:** Base-URL (`http://127.0.0.1:1234/v1`), stabiler
+  Modellname **`ModelHarbor`** (bleibt gleich, wenn das Modell wechselt), Endpunkt-Übersicht und
+  kopierbare Beispiele für **curl**, **Python (openai-SDK)** und **JSON**. Ein Klick kopiert.
+- **LAN-Schalter:** bindet den Server an `0.0.0.0` und zeigt die echten LAN-Adressen des Rechners,
+  damit andere Geräte im Netz ihn nutzen können. Ohne API-Key erscheint eine sichtbare Warnung.
+- **API-Key mit einem Klick erzeugen** (`mh-…`). Ist ein Key gesetzt, wird er auf allen `/v1/*`-Aufrufen
+  erzwungen (401 ohne/falschen Key); `/health` bleibt für Monitoring offen. Der eingebaute Chat
+  sendet den Key automatisch mit.
+- **CORS umschaltbar** (alle Origins vs. nur same-origin) und **parallele Anfragen** (Slots).
+  Hinweis in der UI: llama.cpp teilt das Kontextfenster auf die Slots auf.
+- **Server-Log live im Tab**, Status-Anzeige (Läuft / Startet / Gestoppt), Start/Stop direkt im Tab.
+  Der Chat bleibt im selben Server — ein Modellwechsel aus dem Server-Tab heraus wechselt nicht
+  die Ansicht.
+- **Natives Kontextfenster pro Modell:** `context_length` wird direkt aus den **GGUF-Metadaten**
+  gelesen (neues Modul `electron/gguf-meta.js`, überspringt große Tokenizer-Arrays) und im
+  Einstellungsdialog angezeigt. Wird das trainierte Fenster überschritten, warnt der Dialog
+  sichtbar und verweist auf RoPE-Skalierung.
+- **Port-Prüfung vor dem Start:** ist der Port belegt, kommt eine klare Meldung mit dem Verweis
+  auf den Server-Tab statt eines stillen Ausweichens oder eines hängenden Starts.
+- **Gleiche Zugangsregeln für ONNX-Modelle:** der OGA-Server bekommt jetzt `--host`, `--api-key`
+  und `--cors-origins`. Damit erzwingt auch ein ONNX-Modell im LAN den API-Key (401 ohne/falschen
+  Key, `/health` bleibt offen) und blockt fremde Origins bei eingeschränktem CORS mit 403.
+  Vorher wäre ein ONNX-Server im LAN trotz angezeigtem Key ungeschützt gewesen.
+
+### Fixed
+
+- **Server-Konfiguration ging bei Teil-Änderungen verloren.** `saveSettings` ersetzte das
+  `server`-Objekt durch den Teil-Patch, bevor es zusammengeführt wurde — eine Änderung von nur
+  CORS setzte dadurch Port, LAN-Schalter, API-Key und Slots auf die Standardwerte zurück.
+  Die vorherige Konfiguration wird jetzt vor dem Merge gesichert.
+- **Chat: Enter nahm den Fokus aus dem Textfeld.** Das Eingabefeld wurde während des Streamens
+  `disabled`, was den Fokus dauerhaft kostete. Es ist jetzt nur noch bei gestopptem Server
+  deaktiviert und behält den Fokus beim Senden und während der Antwort.
+
+### Tests
+
+- Node: **148/148** (neu: 18 für GGUF-Metadaten, Server-Konfiguration, Agenten-Beispiele,
+  llama-server-Flags und Port-Prüfung).
+- UI-Smoke: **41/41** (neu: Navigation, Server-Tab, LAN-Schalter, Key-Erzeugung, Kopieren,
+  Start mit Modellwahl, Enter-Fokus).
+- ONNX-Server: **21/21** (neu: 8 für Key-Pflicht, falscher Key, offenes `/health`, CORS `*`
+  vs. `localhost`, Gegenprobe ohne Origin, OPTIONS-Preflight).
+- **Echter End-to-End-Nachweis** mit llama.cpp b12527 und einem realen GGUF: Start über die App,
+  LAN-Erreichbarkeit über die LAN-IP, Key-Pflicht (401/200), echte Chat-Completion über LAN,
+  CORS an/aus (fremde Origin wird mit 403 blockiert), modellspezifisches Kontextfenster im
+  laufenden Prozess, LAN aus = nur lokal, belegter Port wird gemeldet, Konfiguration persistiert.
+- Die Server-Flags wurden gegen die **echte Binary** (`--help`) und live geprüft:
+  `--host`, `--port`, `--api-key`, `--cors-origins` (nicht `--cors`), `--alias`, `--parallel`.
+
 ## [1.6.0] - 2026-11-18
 
 ### Added

@@ -115,6 +115,91 @@ except Exception as e:
 s.close()
 
 srv.shutdown()
+
+
+# --- 4) API-Key-Pflicht und CORS (LAN-Schalter auch fuer ONNX) ---
+def request(port, method="POST", path="/v1/chat/completions", key=None, origin=None):
+    payload = json.dumps({"stream": False, "messages": [{"role": "user", "content": "hi"}]}).encode()
+    hdr = "%s %s HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n" % (method, path)
+    if key:
+        hdr += "Authorization: Bearer %s\r\n" % key
+    if origin:
+        hdr += "Origin: %s\r\n" % origin
+    raw = hdr.encode() + b"Content-Length: " + str(len(payload)).encode() + b"\r\n\r\n" + payload
+    sk = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sk.sendall(raw)
+    sk.settimeout(3)
+    resp = b""
+    try:
+        while b"\r\n\r\n" not in resp:
+            c = sk.recv(4096)
+            if not c:
+                break
+            resp += c
+        head, _, rest = resp.partition(b"\r\n\r\n")
+        lines = head.split(b"\r\n")
+        status = int(lines[0].split()[1])
+        headers = {}
+        for l in lines[1:]:
+            if b":" in l:
+                k, v = l.split(b":", 1)
+                headers[k.decode().lower()] = v.decode().strip()
+        clen = int(headers.get("content-length", "0") or 0)
+        while len(rest) < clen:
+            c = sk.recv(4096)
+            if not c:
+                break
+            rest += c
+        return status, headers, rest[:clen]
+    except (socket.timeout, IndexError, ValueError):
+        return 0, {}, b""
+    finally:
+        sk.close()
+
+
+def serve_with(args):
+    mod.ARGS = args
+    sv = ThreadingHTTPServer(("127.0.0.1", 0), mod.Handler)
+    threading.Thread(target=sv.serve_forever, daemon=True).start()
+    return sv, sv.server_address[1]
+
+
+class KeyArgs:
+    max_tokens = 2048
+    api_key = "mh-onnx-test-key"
+    cors_origins = "*"
+
+
+sv2, port2 = serve_with(KeyArgs())
+st, _, _ = request(port2)
+check("ONNX: ohne Key 401", st == 401, st)
+st, _, body = request(port2, key="mh-onnx-test-key")
+check("ONNX: mit Key 200 und Antwort", st == 200 and b"Hallo Welt" in body, st)
+st, _, _ = request(port2, key="falscher-key")
+check("ONNX: falscher Key 401", st == 401, st)
+st, _, _ = request(port2, method="GET", path="/health")
+check("ONNX: /health bleibt ohne Key offen (Monitoring)", st == 200, st)
+st, hd, _ = request(port2, key="mh-onnx-test-key", origin="http://example.com")
+check("ONNX: CORS * bedient fremde Origin", hd.get("access-control-allow-origin") == "*",
+      hd.get("access-control-allow-origin"))
+sv2.shutdown()
+
+
+class CorsArgs:
+    max_tokens = 2048
+    api_key = "mh-onnx-test-key"
+    cors_origins = "localhost"
+
+
+sv3, port3 = serve_with(CorsArgs())
+st, _, _ = request(port3, key="mh-onnx-test-key", origin="http://example.com")
+check("ONNX: CORS localhost blockt fremde Origin (403)", st == 403, st)
+st, _, body = request(port3, key="mh-onnx-test-key")
+check("ONNX: ohne Origin weiter bedient (Gegenprobe)", st == 200 and b"Hallo Welt" in body, st)
+st, _, _ = request(port3, method="OPTIONS", key="mh-onnx-test-key")
+check("ONNX: OPTIONS-Preflight 204", st == 204, st)
+sv3.shutdown()
+
 print()
 if fails:
     print("=== %d FEHLER: %s ===" % (len(fails), ", ".join(fails)))

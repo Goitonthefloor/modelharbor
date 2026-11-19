@@ -41,6 +41,22 @@ right way.
   recalculated with them (q4_0/q4_0 needs about 28 % of the f16 cache). A quantized V cache
   forces flash attention, as llama.cpp requires. Empty fields fall back to the global defaults;
   models with overrides carry a **Custom** badge.
+- **An API server for your agents.** The new **Server** tab (between *Models* and *Setup*)
+  turns the loaded model into an OpenAI-compatible endpoint that agents and tools can call:
+  pick a model and preset, press **Start server**, and copy the ready-made connection details.
+  You get the base URL (`http://127.0.0.1:1234/v1`), the stable model name **`ModelHarbor`**
+  (it stays the same when you switch models), the endpoints, and copyable **curl**, **Python
+  (openai SDK)** and **JSON** examples. A **LAN switch** binds the server to `0.0.0.0` and shows
+  the real LAN addresses, so other machines in your network can use it. An **API key** can be
+  generated with one click and is then enforced on every `/v1/*` call (`/health` stays open for
+  monitoring); turning the LAN switch on without a key shows a visible warning. **CORS** can be
+  restricted to same-origin, and **parallel requests** sets how many agents are served at once
+  (note that llama.cpp splits the context window across those slots). The built-in chat uses the
+  same server and sends the key automatically, and the server log is shown live in the tab.
+- **The model's own context window.** ModelHarbor reads `context_length` straight from the GGUF
+  metadata and shows it in the per-model settings dialog ("Model context window: N tokens").
+  The context length is set per model, and exceeding the trained window produces a visible
+  warning with a hint about RoPE scaling instead of silently degrading quality.
 - **HuggingFace search.** You can search any GGUF repo, check file size and the hardware
   estimate before downloading, and then load it. Downloads resume after an interruption and
   multi-part models are fetched completely.

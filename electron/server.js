@@ -16,6 +16,9 @@ let state = {
   starting: false,
   pid: null,
   port: null,
+  host: null,
+  apiKey: '',
+  lan: false,
   model: null,
   preset: null,
   startedAt: null,
@@ -84,16 +87,19 @@ async function waitForHealth(port, { timeoutMs = 180000, onTick } = {}) {
   throw new Error(i18n.t('error.modelLoadFailed', { status: lastStatus, tail }));
 }
 
-function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLayers, threads, port, hw, resolved = null }) {
+function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLayers, threads, port, hw, resolved = null, serverConfig = null }) {
   const preset = getPreset(presetId);
   const sampling = { ...preset.sampling, ...(overrides.sampling || {}) };
   const ms = require('./model-settings');
+  const sc = serverConfig || {};
   // Effektive Werte: global < modellspezifisch < expliziter Aufruf.
   const r = resolved || ms.resolve({ global: { ctx, gpuLayers, threads }, call: overrides });
   const args = [
     '--model', modelPath,
+    // Stabiler Alias: Agenten konfigurieren einmal „ModelHarbor“ und können
+    // das Modell wechseln, ohne ihre Konfiguration anzufassen.
     '--alias', overrides.alias || 'ModelHarbor',
-    '--host', '127.0.0.1',
+    '--host', sc.host || '127.0.0.1',
     '--port', String(port),
     '--ctx-size', String(r.ctx),
     '--n-gpu-layers', String(r.gpuLayers === undefined ? 'all' : r.gpuLayers),
@@ -101,6 +107,12 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
     '--jinja',
     '--no-perf',
   ];
+  // Server-Zugang für Agenten: API-Key, CORS, parallele Slots.
+  // Kein simples --cors in llama.cpp: CORS läuft über --cors-origins
+  // (Standard * = alle Origins; „localhost“ = nur same-origin).
+  if (sc.apiKey) args.push('--api-key', String(sc.apiKey));
+  if (sc.cors === false) args.push('--cors-origins', 'localhost');
+  if (sc.parallel) args.push('--parallel', String(sc.parallel));
   const cpuCount = (require('os').cpus() || []).length || 4;
   const t = r.threads || Math.max(2, cpuCount - 1);
   args.push('--threads', String(t));
@@ -116,6 +128,19 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
   return { args, preset, sampling };
 }
 
+/** Prüft, ob ein fester Port frei ist — Agenten brauchen eine stabile Adresse. */
+function assertPortFree(port, host = '127.0.0.1') {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once('error', () => {
+      try { srv.close(); } catch { /* ignore */ }
+      reject(new Error(i18n.t('error.portInUse', { port })));
+    });
+    srv.once('listening', () => srv.close(() => resolve(true)));
+    srv.listen(port, host);
+  });
+}
+
 const logger = require('./logger');
 
 async function startServer(opts) {
@@ -126,11 +151,16 @@ async function startServer(opts) {
   if (!fs.existsSync(serverPath)) throw new Error(i18n.t('error.backendMissing', { path: serverPath }));
   if (!fs.existsSync(modelPath)) throw new Error(i18n.t('error.modelFileMissing', { path: modelPath }));
 
-  const port = opts.port || await freePort(9931);
+  const sc = opts.serverConfig || {};
+  const host = sc.host || '127.0.0.1';
+  const fixedPort = opts.port || sc.port || null;
+  // Fester Port (Server-Tab): nicht still ausweichen, sondern klar melden.
+  if (fixedPort) await assertPortFree(fixedPort, host);
+  const port = fixedPort || await freePort(9931);
   const ctx = (opts.resolved && opts.resolved.ctx) || overrides.ctx || 8192;
   const gpuLayers = opts.resolved ? opts.resolved.gpuLayers
     : (overrides.gpuLayers !== undefined ? overrides.gpuLayers : 999);
-  const { args: _b, preset, sampling } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw, resolved: opts.resolved || null });
+  const { args: _b, preset, sampling } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw, resolved: opts.resolved || null, serverConfig: sc });
 
   // ONNX-Modellordner (GenAI): statt llama-server den OGA-Chat-Server starten.
   // Erkennung: Modellpfad ist ein Verzeichnis mit genai_config.json.
@@ -151,7 +181,11 @@ async function startServer(opts) {
     args = [
       path.join(__dirname, 'onnx_server.py'),
       '--model-dir', modelPath,
+      '--host', host,
       '--port', String(port),
+      // Gleiche Zugangsregeln wie beim llama-Server: Key-Pflicht und CORS.
+      ...(sc.apiKey ? ['--api-key', sc.apiKey] : []),
+      '--cors-origins', sc.cors === false ? 'localhost' : '*',
       '--ep', opts.overrides.ep || 'cpu',
       '--max-tokens', String(maxTok),
     ];
@@ -159,7 +193,7 @@ async function startServer(opts) {
   }
 
   logs = [];
-  setState({ running: false, starting: true, pid: null, port, model: modelPath, preset: presetId, startedAt: null, error: null, argv: args });
+  setState({ running: false, starting: true, pid: null, port, host, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1', model: modelPath, preset: presetId, startedAt: null, error: null, argv: args });
   logger.debug(`startServer mode=${isOnnx ? 'onnx' : 'llama'} executable=${path.basename(executable)} argv=${args.join(' ')}`);
   pushLog(`Starte: ${path.basename(executable)} ${args.join(' ')}`, 'info');
 
@@ -208,7 +242,7 @@ async function startServer(opts) {
   setState({ running: true, starting: false, startedAt: Date.now(), preset: presetId, sampling });
   logger.info(`model ready on port ${port}`);
   pushLog('Modell geladen — Chat ist bereit.', 'info');
-  return { port, pid: proc.pid, model: modelPath, preset: presetId };
+  return { port, pid: proc.pid, model: modelPath, preset: presetId, host, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1' };
 }
 
 async function stopServer() {
@@ -252,7 +286,7 @@ async function stopServer() {
   });
 }
 
-module.exports = { startServer, stopServer, getState, on, freePort, buildArgs, waitForHealth, cleanupOrphans };
+module.exports = { startServer, stopServer, getState, on, freePort, assertPortFree, buildArgs, waitForHealth, cleanupOrphans };
 
 /**
  * Beendet llama-server-Prozesse, die zu unserem Backend-Verzeichnis gehören

@@ -12,6 +12,8 @@ const updater = require('./updater');
 const logger = require('./logger');
 const { childPath, withinRoot, withinAnyRoot } = require('./paths');
 const ms = require('./model-settings');
+const sc = require('./server-config');
+const gguf = require('./gguf-meta');
 const { PRESETS } = require('./presets');
 const i18n = require('../ui/i18n');
 
@@ -31,6 +33,58 @@ function modelRoots() {
   return [settings.modelsDir, ...(settings.extraModelDirs || [])].filter(Boolean);
 }
 
+/* --------------------------- API-Server --------------------------- */
+
+/** Wirksame Server-Konfiguration + alles, was ein Agent zum Verbinden braucht. */
+function serverInfo() {
+  const cfg = sc.resolve(settings.server);
+  const st = server.getState();
+  const info = sc.connectionInfo(cfg, sc.lanAddresses());
+  return {
+    config: cfg,
+    info: {
+      ...info,
+      running: !!st.running,
+      starting: !!st.starting,
+      // Im Betrieb zählt die tatsächlich gebundene Adresse/die echte Portnummer.
+      activePort: st.port || cfg.port,
+      activeHost: st.host || sc.bindHost(cfg),
+      activeLan: st.running ? !!st.lan : !!cfg.lan,
+      model: st.model || null,
+      error: st.error || null,
+    },
+  };
+}
+
+/** llama-server-Flags aus der Konfiguration (host/port/key/cors/parallel). */
+function serverFlags() {
+  const cfg = sc.resolve(settings.server);
+  return {
+    host: sc.bindHost(cfg),
+    port: cfg.port,
+    apiKey: cfg.apiKey,
+    cors: cfg.cors,
+    parallel: cfg.parallel,
+  };
+}
+
+/* Native Kontextfenster je GGUF — gecacht über Pfad + Änderungszeit. */
+const nativeCtxCache = new Map();
+function nativeContext(filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile()) return null;
+    const key = `${filePath}:${st.mtimeMs}:${st.size}`;
+    if (nativeCtxCache.has(key)) return nativeCtxCache.get(key);
+    const ctx = gguf.readGgufContext(filePath);
+    if (nativeCtxCache.size > 500) nativeCtxCache.clear();
+    nativeCtxCache.set(key, ctx);
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+
 function defaultSettings() {
   const base = userDataDir();
   return {
@@ -44,6 +98,7 @@ function defaultSettings() {
     language: 'de',
     debugLog: false,
     extraModelDirs: [],
+    server: { ...sc.DEFAULTS },
   };
 }
 
@@ -61,6 +116,7 @@ function loadSettings() {
   logger.configure({ debug: settings.debugLog, dir: userDataDir() });
   i18n.setLang(settings.language);
   if (!Array.isArray(settings.extraModelDirs)) settings.extraModelDirs = [];
+  settings.server = sc.resolve(settings.server);
   for (const d of [settings.modelsDir, settings.backendsDir]) {
     try { fs.mkdirSync(d, { recursive: true }); } catch { /* ignore */ }
   }
@@ -68,8 +124,12 @@ function loadSettings() {
 }
 
 async function saveSettings(patch) {
+  // Vorherige Server-Konfiguration sichern: der Spread unten würde ein partielles
+  // patch.server (z. B. nur {cors:false}) sonst komplett ersetzen.
+  const prevServer = (settings && settings.server) || {};
   settings = { ...(settings || defaultSettings()), ...patch };
   if (!Array.isArray(settings.extraModelDirs)) settings.extraModelDirs = [];
+  settings.server = sc.resolve({ ...prevServer, ...(patch.server || {}) });
   i18n.setLang(settings.language);
   const file = path.join(userDataDir(), 'settings.json');
   await fsp.mkdir(path.dirname(file), { recursive: true });
@@ -271,6 +331,7 @@ function registerIpc() {
         fit: models.evaluateFit(m.sizeBytes, m.file, hw, r.ctx, { cacheTypeK: r.cacheTypeK, cacheTypeV: r.cacheTypeV }),
         kvBaseGB: models.kvCacheGB(m.sizeBytes, m.file, r.ctx),
         fitCtx: r.ctx,
+        nativeCtx: m.isOnnx ? null : nativeContext(m.path),
         modelSettings: stored,
         settingsSummary: Object.keys(stored).length ? ms.summary(r) : '',
       };
@@ -385,6 +446,7 @@ function registerIpc() {
       onnxPython: backend && backend.id === 'onnx' ? backend.serverPath : undefined,
       overrides: callOverrides,
       resolved,
+      serverConfig: serverFlags(),
       hw: hwCache,
     });
     await saveSettings({ lastPreset: result.preset, lastModelId: opts.modelId || null });
@@ -394,6 +456,18 @@ function registerIpc() {
   ipcMain.handle('server:stop', async () => server.stopServer());
   ipcMain.handle('server:state', () => server.getState());
   ipcMain.handle('server:logs', () => server.getState().logs);
+
+  /* ------------------- API-Server für Agenten ------------------- */
+
+  ipcMain.handle('server:config', async () => serverInfo());
+
+  ipcMain.handle('server:setConfig', async (_e, patch) => {
+    const clean = sc.normalize(patch);
+    await saveSettings({ server: clean });
+    return serverInfo();
+  });
+
+  ipcMain.handle('server:generateKey', async () => ({ key: sc.generateKey() }));
 
   ipcMain.handle('dialog:pickFolder', async () => {
     const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });

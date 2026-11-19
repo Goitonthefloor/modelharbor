@@ -14,6 +14,12 @@ const state = {
   catalog: [],
   local: [],
   modelSources: [],
+  serverConfig: null,
+  serverInfo: null,
+  serverModelId: '',
+  serverPreset: '',
+  serverLogs: [],
+  srvCopy: {},
   searchResults: [],
   filePanel: null,
   server: { running: false, starting: false, port: null, model: null, preset: null, lastModel: null, unloading: false },
@@ -393,6 +399,7 @@ function setView(view) {
   $$('.nav-item').forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
   $$('.view').forEach((v) => v.classList.toggle('is-active', v.id === `view-${view}`));
   if (view === 'models') refreshModelsView();
+  if (view === 'server') refreshServerView();
   if (view === 'setup') renderSetup();
 }
 
@@ -477,7 +484,12 @@ function renderChatState() {
   }
 
   const canChat = !!state.server.running && !state.chat.streaming;
-  input.disabled = !canChat;
+  // Das Textfeld bleibt auch während des Streamens editierbar: ein disabled-Feld
+  // verliert den Fokus und gibt ihn nicht zurück — Enter soll im Feld bleiben.
+  const wasDisabled = input.disabled;
+  input.disabled = !state.server.running;
+  // Gerade nutzbar geworden (Modell geladen): Fokus direkt ins Feld legen.
+  if (wasDisabled && !input.disabled && state.view === 'chat') input.focus();
   const ICON_SEND = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4 20-7Z"></path></svg>';
   const ICON_STOP = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>';
   if (state.chat.streaming) {
@@ -586,6 +598,7 @@ async function sendMessage() {
   addMessage('user', text);
   input.value = '';
   input.style.height = 'auto';
+  input.focus();   // Fokus bleibt nach dem Senden im Eingabefeld
   await runCompletion();
 }
 
@@ -632,7 +645,11 @@ async function runCompletion() {
 
     const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Ist ein API-Key gesetzt, prüft llama-server ihn auch für den Chat.
+        ...(state.server.apiKey ? { Authorization: `Bearer ${state.server.apiKey}` } : {}),
+      },
       body: JSON.stringify(payload),
       signal: state.chat.abort.signal,
     });
@@ -716,7 +733,7 @@ function stopGeneration() {
 
 /* --------------------------- Server --------------------------- */
 
-async function loadModel(model, { presetOverride } = {}) {
+async function loadModel(model, { presetOverride, stay } = {}) {
   if (!model || !model.path) { toast(t('toast.noModelPath'), 'error'); return; }
   if (state.server.running || state.server.starting) {
     const ok = await confirmDialog({
@@ -743,18 +760,26 @@ async function loadModel(model, { presetOverride } = {}) {
     state.server = {
       running: true, starting: false, port: res.port, model: model.path, preset: res.preset,
       unloading: false,
+      apiKey: res.apiKey || '', host: res.host || '127.0.0.1', lan: !!res.lan,
       lastModel: { path: model.path, id: model.id || null, fit: model.fit || null },
     };
     if (res.fit) state.server.fit = res.fit;
     renderChatState();
     renderPresetSelect();
     toast(t('toast.ready', { file: basename(model.path) }), 'ok');
-    setView('chat');
-    setTimeout(() => $('#input').focus(), 120);
+    if (stay) {
+      // Vom Server-Tab gestartet: dort bleiben und die Ansicht auffrischen.
+      await refreshServerConfig();
+      renderServer();
+    } else {
+      setView('chat');
+      setTimeout(() => $('#input').focus(), 120);
+    }
   } catch (e) {
     state.server.starting = false;
     renderChatState();
     toast(e.message || t('toast.loadFailed'), 'error', 9000);
+    if (stay) renderServer();
   }
 }
 
@@ -1027,8 +1052,12 @@ function updateMsPreview() {
   const gb = kv.kvEstimateGB(msModel.kvBaseGB || 0, baseCtx, ctx, k, v);
   $('#ms-kv').textContent = t('ms.kvEstimate', { ctx, gb: gb.toFixed(2), pct: Math.round(kv.kvFactor(k, v) * 100) });
   const note = $('#ms-note');
+  const notes = [];
   // Quantisierter V-Cache braucht Flash-Attention — das Backend erzwingt es.
-  if (kv.isQuantized(v)) { note.textContent = t('ms.vNeedsFa'); note.classList.remove('is-hidden'); }
+  if (kv.isQuantized(v)) notes.push(t('ms.vNeedsFa'));
+  // Über dem trainierten Kontextfenster wird die Qualität schlechter (RoPE kann helfen).
+  if (msModel.nativeCtx && ctx > msModel.nativeCtx) notes.push(t('ms.ctxExceeds', { ctx: msModel.nativeCtx }));
+  if (notes.length) { note.textContent = notes.join(' '); note.classList.remove('is-hidden'); }
   else { note.textContent = ''; note.classList.add('is-hidden'); }
 }
 
@@ -1043,11 +1072,20 @@ function renderModelSettings(info) {
   const cacheOptions = (selected) => `<option value="">${esc(t('ms.default'))} (f16)</option>`
     + types.map((c) => `<option value="${esc(c)}"${c === selected ? ' selected' : ''}>${esc(c)}</option>`).join('');
   const faVal = stored.flashAttn === true ? 'on' : stored.flashAttn === false ? 'off' : '';
-  const num = (f) => `<div class="ms-row">
-      <label for="ms-${f.key}">${esc(t(f.label))}${f.hint ? `<span>${esc(t(f.hint))}</span>` : ''}</label>
+  const num = (f) => {
+    // Beim Kontextfenster die native Größe des Modells mit anzeigen (aus der GGUF gelesen).
+    let hint = f.hint ? t(f.hint) : '';
+    if (f.key === 'ctx') {
+      hint += ' — ' + (msModel.nativeCtx
+        ? t('ms.nativeCtx', { ctx: msModel.nativeCtx })
+        : t('ms.nativeCtxUnknown'));
+    }
+    return `<div class="ms-row">
+      <label for="ms-${f.key}">${esc(t(f.label))}${hint ? `<span>${esc(hint)}</span>` : ''}</label>
       <input type="number" class="num-input" id="ms-${f.key}" data-ms="${f.key}" min="${f.min}" max="${f.max}" step="${f.step}"
         value="${stored[f.key] !== undefined ? esc(stored[f.key]) : ''}" placeholder="${esc(t('ms.default'))}">
     </div>`;
+  };
   const bool = (f) => `<div class="ms-row">
       <label for="ms-${f.key}">${esc(t(f.label))}</label>
       <input type="checkbox" id="ms-${f.key}" data-ms="${f.key}"${stored[f.key] ? ' checked' : ''}>
@@ -1128,6 +1166,248 @@ async function openLoadedModelSettings() {
     m = { id: lm.id || path, path, repo: basename(path), file: basename(path), fit: lm.fit || null };
   }
   await openModelSettings(m);
+}
+
+/* ------------------- Server-Tab: API-Server für Agenten ------------------- */
+
+async function refreshServerConfig() {
+  try {
+    const res = await bridge.server.config();
+    state.serverConfig = res.config;
+    state.serverInfo = res.info;
+  } catch { /* beim allerersten Start noch nicht verfügbar */ }
+}
+
+/** Wirksame Zugangsdaten: im Betrieb zählt der laufende Server, sonst die Konfiguration. */
+function serverAccess() {
+  const cfg = state.serverConfig || { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4 };
+  const running = !!state.server.running;
+  return {
+    cfg,
+    running,
+    port: running ? (state.server.port || cfg.port) : cfg.port,
+    lan: running ? !!state.server.lan : !!cfg.lan,
+    apiKey: running ? (state.server.apiKey || '') : (cfg.apiKey || ''),
+    ips: (state.serverInfo && state.serverInfo.ips) || [],
+  };
+}
+
+function renderServerStatus() {
+  const pill = $('#srv-status');
+  if (!pill) return;
+  const running = !!state.server.running;
+  const starting = !!state.server.starting;
+  pill.className = `srv-pill ${running ? 'is-live' : starting ? 'is-loading' : 'is-off'}`;
+  pill.textContent = running ? t('server.running') : starting ? t('server.starting') : t('server.stopped');
+}
+
+/** Warnung + Agenten-Karte auffrischen, ohne die Eingabefelder neu zu bauen (Fokus bleibt). */
+function updateServerAccessUi() {
+  renderServerStatus();
+  const a = serverAccess();
+  const warn = $('#srv-warning');
+  if (warn) warn.classList.toggle('is-hidden', !(a.lan && !a.apiKey));
+  renderServerAgents();
+  const start = $('#srv-start');
+  const stop = $('#srv-stop');
+  if (start) start.disabled = !!state.server.starting;
+  if (stop) stop.disabled = !state.server.running || !!state.server.starting;
+}
+
+function renderServerAgents() {
+  const box = $('#srv-agents');
+  if (!box) return;
+  const snip = window.SERVER_SNIPPETS;
+  const a = serverAccess();
+  const cfg = { port: a.port, apiKey: a.apiKey };
+  const localUrl = snip.baseUrl('127.0.0.1', a.port);
+  const lanUrls = a.lan ? a.ips.map((ip) => snip.baseUrl(ip, a.port)) : [];
+  const firstLan = lanUrls[0] || null;
+  const exampleIp = a.lan && firstLan ? firstLan.replace(/^http:\/\//, '').replace(/:\d+\/v1$/, '') : '127.0.0.1';
+
+  // Kopierinhalte zentral ablegen — die Buttons referenzieren nur einen Schlüssel.
+  state.srvCopy = {
+    localUrl,
+    lanUrl: firstLan || '',
+    model: snip.MODEL_ALIAS,
+    key: a.apiKey,
+    curl: snip.curlExample(cfg, exampleIp),
+    python: snip.pythonExample(cfg, exampleIp),
+    json: snip.agentJson(cfg, exampleIp),
+  };
+  const copyBtn = (key) => `<button class="btn btn-ghost btn-sm" data-act="srv-copy" data-copy-key="${key}">${esc(t('server.copy'))}</button>`;
+  const row = (label, value, key, hint) => `
+    <div class="srv-kv">
+      <div class="srv-kv-label">${esc(label)}${hint ? `<span>${esc(hint)}</span>` : ''}</div>
+      <code class="srv-value">${esc(value)}</code>
+      ${value ? copyBtn(key) : ''}
+    </div>`;
+  const endpoints = (state.serverInfo && state.serverInfo.endpoints) || [];
+  const snippet = (label, key) => `
+    <div class="srv-snippet-head"><span>${esc(label)}</span>${copyBtn(key)}</div>
+    <pre class="srv-snippet">${esc(state.srvCopy[key])}</pre>`;
+
+  box.innerHTML = `
+    <p class="srv-hint">${esc(t('server.agentsHint'))}</p>
+    ${a.running ? '' : `<p class="srv-note">${esc(t('server.notRunningHint'))}</p>`}
+    ${row(t('server.baseUrl'), localUrl, 'localUrl')}
+    ${a.lan ? lanUrls.map((u, i) => row(`${t('server.baseUrlLan')}${lanUrls.length > 1 ? ' ' + (i + 1) : ''}`, u, i === 0 ? 'lanUrl' : '')).join('') : ''}
+    ${row(t('server.modelName'), snip.MODEL_ALIAS, 'model', t('server.modelNameHint'))}
+    ${a.apiKey ? row(t('server.apiKey'), a.apiKey, 'key') : ''}
+    <div class="srv-kv">
+      <div class="srv-kv-label">${esc(t('server.endpoints'))}</div>
+      <div class="srv-endpoints">${endpoints.map((e) => `<code>${esc(e.method)} ${esc(e.path)}</code>`).join('')}</div>
+    </div>
+    ${snippet(t('server.exampleCurl'), 'curl')}
+    ${snippet(t('server.examplePython'), 'python')}
+    ${snippet(t('server.exampleJson'), 'json')}`;
+}
+
+function renderServerLogs() {
+  const pre = $('#srv-log');
+  if (!pre) return;
+  const lines = state.serverLogs.slice(-200);
+  pre.textContent = lines.length ? lines.map((l) => l.line).join('\n') : t('server.logsEmpty');
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function renderServer() {
+  const body = $('#server-body');
+  if (!body) return;
+  const cfg = state.serverConfig || { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4 };
+  const models = state.local || [];
+  if (!state.serverModelId) {
+    const loaded = models.find((m) => m.path === state.server.model);
+    state.serverModelId = (loaded && loaded.id) || (models[0] && models[0].id) || '';
+  }
+  const presetId = state.serverPreset || state.settings?.lastPreset || 'balanced';
+  const modelOptions = models.map((m) => `<option value="${esc(m.id)}"${m.id === state.serverModelId ? ' selected' : ''}>${esc(m.repo)} · ${esc(m.file)}${m.external ? ` (${esc(t('models.externalBadge'))})` : ''}</option>`).join('');
+  const presetOptions = (state.presets || []).map((p) => `<option value="${esc(p.id)}"${p.id === presetId ? ' selected' : ''}>${esc(p.name || p.id)}</option>`).join('');
+
+  body.innerHTML = `
+    <div class="card srv-card">
+      <div class="card-title">${esc(t('server.model'))}</div>
+      ${models.length ? `
+      <div class="srv-controls">
+        <select id="srv-model" class="srv-select" aria-label="${esc(t('server.model'))}">
+          <option value="">${esc(t('server.modelPlaceholder'))}</option>${modelOptions}
+        </select>
+        <select id="srv-preset" class="srv-select srv-preset" aria-label="${esc(t('server.preset'))}">${presetOptions}</select>
+        <button class="btn btn-primary" id="srv-start" data-act="srv-start">${esc(t('server.start'))}</button>
+        <button class="btn btn-danger-ghost" id="srv-stop" data-act="srv-stop">${esc(t('server.stop'))}</button>
+      </div>` : `<p class="srv-note">${esc(t('server.noModels'))}</p>`}
+      <p class="srv-hint">${esc(t('server.chatUsesSame'))}</p>
+    </div>
+
+    <div class="card srv-card">
+      <div class="card-title">${esc(t('server.access'))}</div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('server.port'))}</strong><span>${esc(t('server.portHint'))}</span></div>
+        <input type="number" class="num-input" id="srv-port" min="1024" max="65535" step="1" value="${esc(cfg.port)}">
+      </div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('server.lan'))}</strong><span>${esc(t('server.lanHint'))}</span></div>
+        <input type="checkbox" id="srv-lan"${cfg.lan ? ' checked' : ''}>
+      </div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('server.apiKey'))}</strong><span>${esc(t('server.apiKeyHint'))}</span></div>
+        <input type="text" class="srv-key" id="srv-key" value="${esc(cfg.apiKey || '')}" placeholder="${esc(t('server.apiKeyPlaceholder'))}" autocomplete="off" spellcheck="false">
+        <button class="btn btn-ghost btn-sm" data-act="srv-genkey">${esc(t('server.generateKey'))}</button>
+      </div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('server.cors'))}</strong><span>${esc(t('server.corsHint'))}</span></div>
+        <input type="checkbox" id="srv-cors"${cfg.cors !== false ? ' checked' : ''}>
+      </div>
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('server.parallel'))}</strong><span>${esc(t('server.parallelHint'))}</span></div>
+        <input type="number" class="num-input" id="srv-parallel" min="1" max="64" step="1" value="${esc(cfg.parallel)}">
+      </div>
+      <p class="srv-warning is-hidden" id="srv-warning">${esc(t('server.lanWarning'))}</p>
+      <p class="srv-hint">${esc(t('server.applyHint'))}</p>
+    </div>
+
+    <div class="card srv-card">
+      <div class="card-title">${esc(t('server.agents'))}</div>
+      <div id="srv-agents"></div>
+    </div>
+
+    <div class="card srv-card">
+      <div class="card-title">${esc(t('server.logs'))}</div>
+      <pre class="srv-log" id="srv-log"></pre>
+    </div>`;
+
+  // Eingaben wirken sofort (change/blur), nicht bei jedem Tastendruck.
+  const port = $('#srv-port');
+  const parallel = $('#srv-parallel');
+  const key = $('#srv-key');
+  if (port) port.addEventListener('change', () => applyServerConfig({ port: Number(port.value) }));
+  if (parallel) parallel.addEventListener('change', () => applyServerConfig({ parallel: Number(parallel.value) }));
+  if (key) key.addEventListener('change', () => applyServerConfig({ apiKey: key.value }));
+  const lan = $('#srv-lan');
+  const cors = $('#srv-cors');
+  if (lan) lan.addEventListener('change', () => applyServerConfig({ lan: lan.checked }));
+  if (cors) cors.addEventListener('change', () => applyServerConfig({ cors: cors.checked }));
+  const modelSel = $('#srv-model');
+  if (modelSel) modelSel.addEventListener('change', () => { state.serverModelId = modelSel.value; });
+  const presetSel = $('#srv-preset');
+  if (presetSel) presetSel.addEventListener('change', () => { state.serverPreset = presetSel.value; });
+
+  renderServerAgents();
+  renderServerLogs();
+  updateServerAccessUi();
+}
+
+async function refreshServerView() {
+  await Promise.all([refreshServerConfig(), refreshLocal()]);
+  renderServer();
+}
+
+async function applyServerConfig(patch) {
+  try {
+    const res = await bridge.server.setConfig(patch);
+    state.serverConfig = res.config;
+    state.serverInfo = res.info;
+    state.settings = { ...(state.settings || {}), server: res.config };
+    updateServerAccessUi();
+  } catch (err) { toast(err.message, 'error', 8000); }
+}
+
+async function startServerFromTab() {
+  const model = state.local.find((m) => m.id === state.serverModelId);
+  if (!model) { toast(t('server.selectModelFirst'), 'error', 6000); return; }
+  await loadModel(model, { presetOverride: state.serverPreset || undefined, stay: true });
+}
+
+async function stopServerFromTab() {
+  await unloadModel(true);
+  toast(t('server.stoppedToast'), 'ok', 4000);
+  await refreshServerConfig();
+  renderServer();
+}
+
+async function generateServerKey() {
+  try {
+    const res = await bridge.server.generateKey();
+    const input = $('#srv-key');
+    if (input) input.value = res.key;
+    await applyServerConfig({ apiKey: res.key });
+    toast(t('server.keyGenerated'), 'ok', 4000);
+  } catch (err) { toast(err.message, 'error', 8000); }
+}
+
+async function copyServerValue(key) {
+  const text = (state.srvCopy || {})[key];
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(t('server.copied'), 'ok', 1800);
+  } catch { toast(text, 'info', 6000); }
+}
+
+function appendServerLog(entry) {
+  state.serverLogs.push(entry);
+  if (state.serverLogs.length > 400) state.serverLogs = state.serverLogs.slice(-400);
+  if (state.view === 'server') renderServerLogs();
 }
 
 /* --------------------------- Setup --------------------------- */
@@ -1501,6 +1781,10 @@ function bindEvents() {
       if (m) await openModelSettings(m);
     }
     if (act === 'model-settings-loaded') { await openLoadedModelSettings(); }
+    if (act === 'srv-start') { await startServerFromTab(); }
+    if (act === 'srv-stop') { await stopServerFromTab(); }
+    if (act === 'srv-genkey') { await generateServerKey(); }
+    if (act === 'srv-copy') { await copyServerValue(btn.dataset.copyKey); }
     if (act === 'open-models') { ipc(bridge.shell.showModels()); }
     if (act === 'add-source') {
       try {
@@ -1614,6 +1898,7 @@ function bindEvents() {
 
   bridge.on('server:log', (entry) => {
     if (!entry) return;
+    appendServerLog(entry);
     // Nur relevante Zeilen in die UI spiegeln
     if (window.__showServerLogs) console.log('[llama]', entry.line);
   });
@@ -1625,6 +1910,10 @@ function bindEvents() {
       state.server.starting = false;
       state.server.port = st.port;
       state.server.model = st.model;
+      // Zugangsdaten des laufenden Servers (für Chat-Header und Server-Tab)
+      state.server.apiKey = st.apiKey || '';
+      state.server.host = st.host || '127.0.0.1';
+      state.server.lan = !!st.lan;
       if (st.preset) state.server.preset = st.preset;
       if (!state.server.lastModel) {
         state.server.lastModel = { path: st.model, id: null, fit: null };
@@ -1633,6 +1922,7 @@ function bindEvents() {
       state.server.running = false;
     }
     renderChatState();
+    if (state.view === 'server') updateServerAccessUi();
   });
 }
 
@@ -1710,6 +2000,7 @@ async function init() {
     renderChatState();
 
     refreshModelSources();
+    refreshServerConfig();
     refreshLocal();
     refreshCatalog();
 

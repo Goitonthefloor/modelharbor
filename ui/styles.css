@@ -457,6 +457,63 @@ dialog::backdrop {
 .dialog-body p { margin: 0 0 18px; color: var(--text-dim); font-size: 13.5px; line-height: 1.5; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin: 0; }
 
+/* ---------- Server-Tab ---------- */
+.srv-pill {
+  font-size: 12px; padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap;
+}
+.srv-pill.is-live { color: #6ee7b7; background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.3); }
+.srv-pill.is-loading { color: #fcd34d; background: rgba(251,191,36,.1); border-color: rgba(251,191,36,.3); }
+.srv-pill.is-off { color: var(--muted); background: rgba(255,255,255,.03); }
+.srv-card { margin-bottom: 14px; padding: 16px 18px; display: block; }
+.srv-card .card-title { margin-bottom: 10px; }
+.srv-controls { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+.srv-select {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 9px; padding: 8px 10px; font-size: 13px; min-width: 0;
+}
+#srv-model { flex: 1 1 260px; }
+.srv-preset { flex: 0 0 auto; max-width: 170px; }
+.srv-key {
+  flex: 1 1 180px; min-width: 0; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
+  font-family: var(--mono); font-size: 12px;
+}
+.srv-hint { margin: 10px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.srv-note { margin: 8px 0 0; font-size: 12.5px; color: var(--text-dim); }
+.srv-warning {
+  margin: 12px 0 0; padding: 10px 12px; border-radius: 9px; font-size: 12.5px; line-height: 1.45;
+  color: #fcd34d; background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.28);
+}
+.srv-kv { display: flex; align-items: center; gap: 10px; padding: 7px 0; flex-wrap: wrap; }
+.srv-kv-label { flex: 0 0 150px; font-size: 12.5px; color: var(--text-dim); }
+.srv-kv-label span { display: block; font-size: 11.2px; color: var(--muted); margin-top: 1px; }
+.srv-value {
+  flex: 1 1 200px; min-width: 0; font-family: var(--mono); font-size: 12px;
+  background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 8px;
+  padding: 6px 9px; overflow-wrap: anywhere;
+}
+.srv-endpoints { display: flex; gap: 7px; flex-wrap: wrap; flex: 1 1 200px; }
+.srv-endpoints code {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+  background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 7px; padding: 4px 8px;
+}
+.srv-snippet-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 14px 0 5px; font-size: 12.5px; color: var(--text-dim);
+}
+.srv-snippet {
+  margin: 0; padding: 11px 13px; background: var(--panel-2); border: 1px solid var(--border-soft);
+  border-radius: 9px; font-family: var(--mono); font-size: 11.8px; line-height: 1.55;
+  color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto;
+}
+.srv-log {
+  margin: 0; padding: 11px 13px; background: var(--panel-2); border: 1px solid var(--border-soft);
+  border-radius: 9px; font-family: var(--mono); font-size: 11.3px; line-height: 1.5;
+  color: var(--text-dim); white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 260px; overflow-y: auto;
+}
+
 /* ---------- Modell-Einstellungen ---------- */
 #model-settings-dialog { max-width: min(560px, calc(100vw - 40px)); }
 .ms-body { display: flex; flex-direction: column; max-height: min(82vh, 760px); overflow: hidden; }
