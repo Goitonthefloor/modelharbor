@@ -10,6 +10,7 @@ const fs = require('fs');
 const http = require('http');
 const { samplingArgs, getPreset } = require('./presets');
 const scfg = require('./server-config');
+const { findVisionProjector } = require('./models');
 
 let proc = null;
 let state = {
@@ -25,6 +26,9 @@ let state = {
   model: null,
   preset: null,
   startedAt: null,
+  // Bilder (Vision) kann der Server nur anbieten, wenn neben dem Modell ein
+  // mmproj-Projektor liegt — das UI sperrt den Bild-Anhang sonst.
+  vision: false,
   error: null,
 };
 let logs = [];
@@ -134,14 +138,16 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
   args.push('--threads', String(t));
   // Flash-Attention + getrennte K/V-Cache-Quantisierung, Batch, mlock/mmap, RoPE
   args.push(...ms.llamaArgs(r));
-  // mmproj automatisch, wenn neben dem Modell vorhanden
+  // mmproj automatisch, wenn neben dem Modell vorhanden — nur damit kann das
+  // Modell Bilder sehen.
+  let vision = false;
   try {
     const dir = path.dirname(modelPath);
-    const mm = fs.readdirSync(dir).find((f) => /^mmproj.*\.gguf$/i.test(f));
-    if (mm) args.push('--mmproj', path.join(dir, mm));
+    const mm = findVisionProjector(dir);
+    if (mm) { args.push('--mmproj', path.join(dir, mm)); vision = true; }
   } catch { /* ignore */ }
   args.push(...samplingArgs(sampling));
-  return { args, preset, sampling };
+  return { args, preset, sampling, vision };
 }
 
 /** Prüft, ob ein fester Port frei ist — Agenten brauchen eine stabile Adresse. */
@@ -181,7 +187,7 @@ async function startServer(opts) {
   const ctx = (opts.resolved && opts.resolved.ctx) || overrides.ctx || 8192;
   const gpuLayers = opts.resolved ? opts.resolved.gpuLayers
     : (overrides.gpuLayers !== undefined ? overrides.gpuLayers : 999);
-  const { args: _b, preset, sampling } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw, resolved: opts.resolved || null, serverConfig: sc });
+  const { args: _b, preset, sampling, vision: llamaVision } = buildArgs({ serverPath, modelPath, presetId, overrides, ctx, gpuLayers, threads: overrides.threads, port, hw, resolved: opts.resolved || null, serverConfig: sc });
 
   // ONNX-Modellordner (GenAI): statt llama-server den OGA-Chat-Server starten.
   // Erkennung: Modellpfad ist ein Verzeichnis mit genai_config.json.
@@ -225,7 +231,14 @@ async function startServer(opts) {
     ? (sc.cors === false ? 'localhost' : '*')
     : scfg.effectiveCorsOrigins(sc);
   const effectiveParallel = sc.parallel ? Number(sc.parallel) : null;
-  setState({ running: false, starting: true, pid: null, port, host, corsOrigins: effectiveCors, parallel: effectiveParallel, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1', model: modelPath, preset: presetId, startedAt: null, error: null });
+  setState({
+    running: false, starting: true, pid: null, port, host, corsOrigins: effectiveCors,
+    parallel: effectiveParallel, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1',
+    model: modelPath, preset: presetId, startedAt: null,
+    // ONNX-Server kann keine Bilder; llama.cpp nur mit mmproj-Projektor.
+    vision: isOnnx ? false : llamaVision,
+    error: null,
+  });
   logger.debug(`startServer mode=${isOnnx ? 'onnx' : 'llama'} executable=${path.basename(executable)} argv=${args.join(' ')}`);
   pushLog(`Starte: ${path.basename(executable)} ${args.join(' ')}`, 'info');
 
@@ -251,7 +264,7 @@ async function startServer(opts) {
   });
   proc.on('exit', (code, signal) => {
     pushLog(`Prozess beendet (Code ${code}${signal ? `, Signal ${signal}` : ''})`, 'info');
-    setState({ running: false, starting: false, pid: null, error: code && code !== 0 ? `Server beendet mit Code ${code}` : null });
+    setState({ running: false, starting: false, pid: null, vision: false, error: code && code !== 0 ? `Server beendet mit Code ${code}` : null });
     proc = null;
   });
 
@@ -274,12 +287,12 @@ async function startServer(opts) {
   setState({ running: true, starting: false, startedAt: Date.now(), preset: presetId, sampling });
   logger.info(`model ready on port ${port}`);
   pushLog('Modell geladen — Chat ist bereit.', 'info');
-  return { port, pid: proc.pid, model: modelPath, preset: presetId, host, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1' };
+  return { port, pid: proc.pid, model: modelPath, preset: presetId, host, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1', vision: isOnnx ? false : llamaVision };
 }
 
 async function stopServer() {
   if (!proc) {
-    setState({ running: false, starting: false, pid: null });
+    setState({ running: false, starting: false, pid: null, vision: false });
     return { stopped: true, alreadyStopped: true };
   }
   const p = proc;
@@ -291,7 +304,7 @@ async function stopServer() {
       if (done) return;
       done = true;
       proc = null;
-      setState({ running: false, starting: false, pid: null });
+      setState({ running: false, starting: false, pid: null, vision: false });
       resolve({ stopped: true, how });
     };
     const timer = setTimeout(() => {

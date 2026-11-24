@@ -29,7 +29,7 @@ window.api = {
   },
   presets: async () => ([{ id: 'balanced', name: 'Balanced', icon: '⚖', description: 'Standard', systemPrompt: '', sampling: {} }]),
   server: {
-    state: async () => ({ running: false }),
+    state: async () => (window.__srvState || { running: false }),
     start: async (o) => { window.__apiCalls.push(['start', o]); return { port: 9931, preset: o.preset }; },
     stop: async () => { window.__apiCalls.push(['stop']); return { stopped: true }; },
     config: async () => ({ config: window.__srvCfg, info: window.__srvInfo }),
@@ -299,7 +299,7 @@ with sync_playwright() as p:
                calls: window.__settingsCalls.filter(c => c.language) };
     }""")
     check("i18n: Sprachwechsel auf Englisch rendert sofort um",
-          i18n_en["lang"] == "en" and i18n_en["nav"] == ["Chat", "Models", "Server", "Setup"]
+          i18n_en["lang"] == "en" and i18n_en["nav"] == ["Chat", "Models", "Server", "Benchmark", "Setup"]
           and "Settings" in i18n_en["titles"] and "Your system" in i18n_en["titles"]
           and i18n_en["modelsTitle"] == "Models"
           and i18n_en["hint"] == "Load a model to start chatting"
@@ -313,7 +313,7 @@ with sync_playwright() as p:
       return { lang: document.documentElement.lang, nav, calls: window.__settingsCalls.filter(c => c.language) };
     }""")
     check("i18n: Rueckwechsel auf Deutsch",
-          i18n_back["lang"] == "de" and i18n_back["nav"] == ["Chat", "Modelle", "Server", "Einrichtung"]
+          i18n_back["lang"] == "de" and i18n_back["nav"] == ["Chat", "Modelle", "Server", "Benchmark", "Einrichtung"]
           and any(c["language"] == "de" for c in i18n_back["calls"]),
           json.dumps(i18n_back, ensure_ascii=False))
 
@@ -563,8 +563,8 @@ with sync_playwright() as p:
 
     # Feature: Server-Tab (API fuer Agenten) inkl. LAN-Schalter
     nav_order = page.evaluate("() => [...document.querySelectorAll('.nav-item')].map(b => b.dataset.view)")
-    check("Navigation: Server zwischen Modelle und Einrichtung",
-          nav_order == ["chat", "models", "server", "setup"], json.dumps(nav_order))
+    check("Navigation: Server zwischen Modelle und Benchmark, Einrichtung zuletzt",
+          nav_order == ["chat", "models", "server", "bench", "setup"], json.dumps(nav_order))
 
     page.evaluate("setView('server')")
     page.wait_for_timeout(500)
@@ -832,9 +832,10 @@ with sync_playwright() as p:
                 state.backends = { available: [], installed, release: { tag: 'b1' } };
                 state.hw = { recommendation: { primary, candidates: [] } };
                 state.local = models;
-                if (srvBackend) state.server = { running: true, starting: false, port: 9931,
+                if (srvBackend) { const srvState = { running: true, starting: false, port: 9931,
                   model: models[0].path, preset: 'balanced', backend: srvBackend, apiKey: '', host: '127.0.0.1', lan: false };
-                renderLocal(); renderServer();
+                  state.server = srvState; window.__srvState = srvState; }
+                renderLocal(); renderServer(); renderSidebar();
             }""",
             [models, installed, primary, srv_backend])
         page.wait_for_timeout(120)
@@ -876,6 +877,54 @@ with sync_playwright() as p:
     check("Server-Karte: laufendes Backend wird angezeigt",
           srv["badge"] == "llama.cpp · Vulkan" and any("Backend" in h for h in srv["hint"]),
           json.dumps(srv, ensure_ascii=False))
+
+
+    # Unten links muss das AKTIVE Backend stehen (nicht das erste installierte):
+    # laufender Server schlaegt Backend-Wahl, Backend-Wahl schlaegt Empfehlung.
+    SIDEBAR_JS = """
+    () => {
+      const el = document.querySelector('#side-status');
+      if (!el) return null;
+      const blocks = [...el.querySelectorAll('.side-block')].map(b => ({
+        label: (b.querySelector('.side-label') || {}).textContent || '',
+        values: [...b.querySelectorAll('.side-value')].map(v => v.textContent.trim()),
+        dot: (b.querySelector('.side-value .dot-ok, .side-value .dot-warn, .side-value .dot-off') || {}).className || '',
+      }));
+      const be = blocks.find(b => /Backend/.test(b.label)) || null;
+      return { be, blocks: blocks.length };
+    }
+    """
+
+    render_with([GGUF], [CUDA, VULKAN], "linux-vulkan", srv_backend="linux-vulkan")
+    sb = page.evaluate(SIDEBAR_JS)
+    check("Sidebar: laufender Server -> aktives Backend unten links (Vulkan, 'läuft gerade')",
+          sb and sb["be"] and sb["be"]["values"][0] == "Vulkan"
+          and sb["be"]["values"][1] == "läuft gerade" and "dot-ok" in sb["be"]["dot"],
+          json.dumps(sb, ensure_ascii=False))
+
+    page.evaluate("() => { state.server = { running: false, starting: false, unloading: false }; window.__srvState = null; state.settings = { backendPreference: 'auto' }; renderSidebar(); }")
+    sb = page.evaluate(SIDEBAR_JS)
+    check("Sidebar: kein Server -> Empfehlung der Hardware (Vulkan), nicht das erste installierte (CUDA)",
+          sb and sb["be"] and sb["be"]["values"][0] == "Vulkan"
+          and sb["be"]["values"][1] == "Empfehlung für diese Hardware",
+          json.dumps(sb, ensure_ascii=False))
+
+    page.evaluate("() => { state.settings = { backendPreference: 'linux-cuda-12.8' }; renderSidebar(); }")
+    sb = page.evaluate(SIDEBAR_JS)
+    check("Sidebar: Backend-Wahl aus dem Server-Tab schlaegt die Empfehlung (CUDA 12.8)",
+          sb and sb["be"] and sb["be"]["values"][0] == "CUDA 12.8"
+          and sb["be"]["values"][1] == "gewählt (Server-Tab)",
+          json.dumps(sb, ensure_ascii=False))
+
+    page.evaluate("() => { state.settings = { backendPreference: 'auto' }; state.hw = { cpuModel: 'Test CPU', gpus: [], recommendation: { primary: 'linux-rocm', candidates: [] } }; renderSidebar(); }")
+    sb = page.evaluate(SIDEBAR_JS)
+    check("Sidebar: empfohlenes, aber fehlendes Backend wird als 'noch nicht installiert' gezeigt",
+          sb and sb["be"] and sb["be"]["values"][0] == "ROCm"
+          and sb["be"]["values"][1] == "noch nicht installiert",
+          json.dumps(sb, ensure_ascii=False))
+
+    # Aufraeumen: Zustand fuer die folgenden Checks wiederherstellen
+    render_with([GGUF], [CUDA, VULKAN], "linux-vulkan", srv_backend="linux-vulkan")
 
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))

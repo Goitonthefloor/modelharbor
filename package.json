@@ -2,9 +2,18 @@
   "name": "modelharbor",
   "productName": "ModelHarbor",
   "desktopName": "modelharbor.desktop",
-  "version": "1.8.3",
+  "version": "2.0.0",
   "description": "Lokale KI-Chatmodelle mit einem Klick: Hardware-Erkennung, passende Modellvorschläge, HuggingFace-Download und fertige Presets.",
   "main": "electron/main.js",
+  "bin": {
+    "model-harbor": "bin/model-harbor.js"
+  },
+  "files": [
+    "bin/",
+    "cli/",
+    "electron/",
+    "ui/"
+  ],
   "author": "Rolf Greger",
   "license": "SEE LICENSE IN LICENSE",
   "type": "commonjs",
@@ -60,6 +69,7 @@
     }
   },
   "dependencies": {
+    "pdfjs-dist": "^4.10.38",
     "tar": "^7.5.23",
     "yauzl": "^2.10.0"
   },

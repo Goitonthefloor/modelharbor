@@ -279,6 +279,12 @@ function isVisionProjector(file) {
   return b.startsWith('mmproj') && b.endsWith('.gguf');
 }
 
+/** Vision-Projektor (mmproj) in einem Modellordner — null, wenn keiner liegt. */
+function findVisionProjector(dirPath, files) {
+  const list = files || (() => { try { return fs.readdirSync(dirPath); } catch { return []; } })();
+  return list.find(isVisionProjector) || null;
+}
+
 function bytesFromSizeEntry(s) {
   if (!s) return 0;
   if (typeof s.size === 'number') return s.size;
@@ -720,6 +726,7 @@ async function modelsInDir(dirPath, relDir, { external, sourceIndex, sourceDir }
   try { files = await fsp.readdir(dirPath); } catch { return out; }
   // mmproj/imatrix & Co. sind Hilfsdateien, keine eigenstaendigen Modelle
   const ggufs = files.filter((f) => f.toLowerCase().endsWith('.gguf') && !isAuxiliary(f)).sort();
+  const visionProjector = findVisionProjector(dirPath, files);
   const repo = (relDir || dirName).replace(/__/g, '/');
   const mkId = (key) => (external
     ? `ext${sourceIndex}:${relDir ? relDir + '/' : ''}${key}`
@@ -749,6 +756,7 @@ async function modelsInDir(dirPath, relDir, { external, sourceIndex, sourceDir }
       repo,
       file: `ONNX-${dirName}`,
       isOnnx: true,
+      vision: false,
       parts: [],
       path: dirPath,
       sizeBytes: size,
@@ -773,6 +781,8 @@ async function modelsInDir(dirPath, relDir, { external, sourceIndex, sourceDir }
       id: mkId(key),
       repo,
       file: key,
+      // Bilder kann nur ein Modell mit Vision-Projektor (mmproj) sehen.
+      vision: !!visionProjector,
       parts: parts.map((pp) => path.join(dirPath, pp)),
       path: path.join(dirPath, parts[0]),
       sizeBytes: size,
@@ -899,5 +909,5 @@ module.exports = {
   searchModels, searchOnnxModels, modelFiles, catalogWithFit, pickBestQuant, evaluateFit, kvCacheGB,
   downloadModel, downloadOnnxModel, parseOnnxFiles, parseOnnxFolderFiles, onnxModelFiles,
   listLocal, deleteModel, quantFromName, quantBits, getJson, downloadFile,
-  scanModelRoot, isExternalId,
+  scanModelRoot, isExternalId, findVisionProjector, isVisionProjector,
 };

@@ -267,6 +267,43 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
   max-block-size: 10lh;
 }
 .composer-box textarea::placeholder { color: #5e6b7c; }
+/* ---------- Anhänge im Composer ---------- */
+.attach-btn { width: 34px; height: 34px; padding: 0; flex: none; align-self: flex-end; color: var(--muted); border-radius: 10px; }
+.attach-btn:hover:not(:disabled) { color: var(--accent); }
+.attach-btn:disabled { opacity: .38; cursor: not-allowed; }
+.attach-bar {
+  max-width: 860px; margin: 0 auto 7px; display: flex; flex-wrap: wrap; gap: 7px;
+}
+.attach-chip {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 300px;
+  padding: 4px 6px 4px 8px; border-radius: 999px; font-size: 12px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim);
+}
+.attach-chip.is-error { border-color: rgba(248,113,113,.45); color: #fca5a5; }
+.attach-ext {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .04em; padding: 2px 5px;
+  border-radius: 5px; background: rgba(45,212,191,.13); color: var(--accent);
+}
+.attach-thumb { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; flex: none; }
+.attach-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-x {
+  border: none; background: transparent; color: var(--muted); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 3px; border-radius: 50%;
+}
+.attach-x:hover { color: #fca5a5; }
+.composer.is-drag .composer-box { border-color: rgba(45,212,191,.65); box-shadow: 0 0 0 3px rgba(45,212,191,.13); }
+
+/* Anhänge in der gesendeten Nachricht */
+.msg-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.msg-attach-chip {
+  font-size: 11.5px; padding: 3px 9px; border-radius: 999px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: var(--text-dim);
+}
+.msg-attach-img {
+  width: 84px; height: 84px; object-fit: cover; border-radius: 9px;
+  border: 1px solid var(--border); display: block;
+}
+
 .send-btn { width: 38px; height: 38px; padding: 0; border-radius: 11px; flex: none; }
 .send-btn.is-stop { background: #f87171; border-color: transparent; color: #2b0b0b; }
 .reasoning { margin: 0 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-2); overflow: hidden; }
@@ -278,6 +315,31 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
   max-width: 860px; margin: 7px auto 0; display: flex; justify-content: space-between;
   font-size: 11px; color: #5e6b7c; padding: 0 4px;
 }
+
+/* ---------- Benchmark ---------- */
+.bench-table {
+  width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.bench-table th {
+  text-align: right; font-weight: 600; font-size: 11px; letter-spacing: .02em;
+  color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.bench-table th:first-child, .bench-table td:first-child { text-align: left; }
+.bench-table td { padding: 7px 10px; border-bottom: 1px solid var(--border-soft); text-align: right; }
+.bench-table tbody tr:last-child td { border-bottom: none; }
+.bench-table td:nth-child(2) { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bench-history td:first-child, .bench-history th:first-child { white-space: nowrap; }
+.bench-summary { display: flex; gap: 12px; margin: 12px 0 4px; }
+.bench-kpi {
+  flex: 1; padding: 10px 14px; border-radius: 12px; background: var(--panel-2);
+  border: 1px solid var(--border); display: flex; align-items: baseline; gap: 8px;
+}
+.bench-kpi span { font-size: 11.5px; color: var(--muted); }
+.bench-kpi strong { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--accent); }
+.bench-kpi em { font-size: 11px; font-style: normal; color: var(--muted); }
+.bench-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 
 /* ---------- Seiten ---------- */
 .page-head {

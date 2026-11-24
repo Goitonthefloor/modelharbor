@@ -23,9 +23,12 @@ const state = {
   searchResults: [],
   filePanel: null,
   server: { running: false, starting: false, port: null, model: null, preset: null, lastModel: null, unloading: false },
-  chat: { messages: [], streaming: false, abort: null, pending: null },
+  // attachments: Dateien/Bilder, die an die nächste Nachricht angehängt werden
+  chat: { messages: [], streaming: false, abort: null, pending: null, attachments: [] },
   downloads: new Map(),
   backendInstalls: new Map(),
+  // Benchmark: gespeicherte Läufe (benchmarks.json) + Zustand des laufenden Messlaufs
+  bench: { entries: null, running: false, abort: null, results: [], startedAt: 0 },
   activeTab: 'catalog',
   view: 'chat',
   booted: false,
@@ -298,7 +301,11 @@ function fitBadge(fit) {
 /** Backend, das für dieses Modell startet — gleiche Regel wie im Main (ui/model-backend.js). */
 function backendDesc(m) {
   const installed = (state.backends && state.backends.installed) || [];
-  const primary = state.hw && state.hw.recommendation ? state.hw.recommendation.primary : null;
+  // Gewähltes Backend (Server-Tab) schlägt die Hardware-Empfehlung — sonst würden
+  // Badges etwas anderes anzeigen als der Start tatsächlich verwendet.
+  const pref = (state.settings && state.settings.backendPreference) || 'auto';
+  const primary = (pref !== 'auto' ? pref : null)
+    || (state.hw && state.hw.recommendation ? state.hw.recommendation.primary : null);
   return window.MODELBACKEND.describe(installed, { primary, isOnnx: !!(m && m.isOnnx) });
 }
 
@@ -327,6 +334,37 @@ function runningBackendBadge(backendId) {
   const key = isOnnx ? 'backend.titleOnnx' : 'backend.titleLlama';
   const vars = { backend: manifest ? manifest.label : String(backendId || ''), engine: t('backend.llama') };
   return `<span class="badge ${isOnnx ? 'badge-onnx' : 'badge-backend'}" title="${esc(t(key, vars))}">${esc(text)}</span>`;
+}
+
+/**
+ * Das aktuell aktive Backend für die Anzeige unten links.
+ * Reihenfolge wie beim Start (backendDesc): läuft der Server, gilt sein Backend;
+ * sonst die Backend-Wahl aus dem Server-Tab; sonst die Empfehlung der Hardware-Erkennung.
+ * Rückgabe: { id, label, state: 'running'|'chosen'|'recommended'|'none', installed }
+ */
+function activeBackend() {
+  const installed = (state.backends && state.backends.installed) || [];
+  const byId = (id) => installed.find((b) => b.id === id) || null;
+  const present = (id, m) => id === window.MODELBACKEND.ONNX_ID || !!m;
+  const naming = (id, m) => {
+    if (id === window.MODELBACKEND.ONNX_ID) return t('backend.onnx');
+    // Kurzname kommt aus der Tabelle (ui/model-backend.js) und funktioniert auch ohne
+    // installiertes Manifest — sonst stünde bei fehlendem Backend die rohe ID da.
+    const short = window.MODELBACKEND.shortName(id, m ? m.label : '');
+    return short || (m ? m.label : String(id));
+  };
+
+  const srvId = state.server && state.server.running ? state.server.backend : null;
+  if (srvId) {
+    const m = byId(srvId);
+    return { id: srvId, label: naming(srvId, m), state: 'running', installed: present(srvId, m) };
+  }
+  const pref = (state.settings && state.settings.backendPreference) || 'auto';
+  const primary = (state.hw && state.hw.recommendation) ? state.hw.recommendation.primary : null;
+  const id = pref !== 'auto' ? pref : primary;
+  if (!id) return { id: null, label: '', state: 'none', installed: false };
+  const m = byId(id);
+  return { id, label: naming(id, m), state: pref !== 'auto' ? 'chosen' : 'recommended', installed: present(id, m) };
 }
 
 // Übersetzte Fit-Texte: Deutsch kommt aus dem Main-Prozess, Englisch wird aus den Messwerten gebaut
@@ -436,6 +474,7 @@ function setView(view) {
   $$('.view').forEach((v) => v.classList.toggle('is-active', v.id === `view-${view}`));
   if (view === 'models') refreshModelsView();
   if (view === 'server') refreshServerView();
+  if (view === 'bench') refreshBenchView();
   if (view === 'setup') renderSetup();
 }
 
@@ -449,21 +488,28 @@ function refreshModelsView() {
 
 function renderSidebar() {
   const hw = state.hw;
-  const b = state.backends;
-  const installed = b && b.installed && b.installed.length ? b.installed : [];
   const el = $('#side-status');
   if (!hw) { el.innerHTML = `<div class="side-hint">${esc(t('sidebar.detecting'))}</div>`; return; }
   const gpu = (hw.gpus || []).filter((g) => g.vramGB).sort((a, b2) => b2.vramGB - a.vramGB)[0];
-  const be = installed[0];
+  // Nicht das erste installierte Backend zeigen, sondern das, mit dem gerade gearbeitet
+  // wird: laufender Server, sonst die Wahl aus dem Server-Tab, sonst die Empfehlung.
+  const act = activeBackend();
+  const beDot = act.state === 'running' ? 'dot-ok' : !act.id ? 'dot-warn' : 'dot-off';
+  const beText = act.id ? act.label : t('sidebar.notConfigured');
+  const beSub = act.state === 'running' ? t('sidebar.backendRunning')
+    : act.state === 'none' ? t('sidebar.backendMissing')
+      : !act.installed ? t('sidebar.backendNotInstalled')
+        : act.state === 'chosen' ? t('sidebar.backendChosen') : t('sidebar.backendRecommended');
   el.innerHTML = `
     <div class="side-block">
       <div class="side-label">${esc(t('sidebar.hardware'))}</div>
       <div class="side-value">${esc(gpu ? `${gpu.vendor} · ${gpu.vramGB} GB` : t('sidebar.cpuOnly'))}</div>
-      <div class="side-value side-cpu">${esc(hw.cpuModel.replace(/\(R\)|\(TM\)/g, '').replace(/\s+/g, ' '))}</div>
+      <div class="side-value side-cpu">${esc(String(hw.cpuModel || '').replace(/\(R\)|\(TM\)/g, '').replace(/\s+/g, ' '))}</div>
     </div>
     <div class="side-block">
       <div class="side-label">${esc(t('sidebar.backend'))}</div>
-      <div class="side-value"><span class="${be ? 'dot-ok' : 'dot-warn'}"></span>${be ? esc(be.label) : esc(t('sidebar.notConfigured'))}</div>
+      <div class="side-value"><span class="${beDot}"></span>${esc(beText)}</div>
+      <div class="side-value side-cpu">${esc(beSub)}</div>
     </div>
     <div class="side-block">
       <div class="side-label">${esc(t('sidebar.model'))}</div>
@@ -539,12 +585,22 @@ function renderChatState() {
     send.innerHTML = ICON_SEND;
     send.title = t('chat.sendTitle');
   }
+  // Anhänge nur bei laufendem Modell; Bilder nur mit Vision-Projektor (mmproj).
+  const attachFile = $('#btn-attach-file');
+  const attachImage = $('#btn-attach-image');
+  if (attachFile) attachFile.disabled = !state.server.running;
+  if (attachImage) {
+    attachImage.disabled = !state.server.running || !state.server.vision;
+    attachImage.title = state.server.vision ? t('chat.attachImageTitle') : t('chat.attachNoVision');
+  }
   hint.textContent = state.server.running ? t('chat.enterHint') : t('chat.loadToChat');
   if (empty) empty.style.display = state.chat.messages.length ? 'none' : '';
   if (state.server.running && empty) empty.style.display = 'none';
 
   renderUnloadBtn();
   renderSidebar();
+  // Benchmark-Ansicht hängt am Server-Zustand (Start-Button nur mit Modell)
+  if (state.view === 'bench') renderBench();
 }
 
 const ICON_EJECT = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 14h14L12 5l-7 9Z"></path><path d="M5 19h14"></path></svg>';
@@ -584,7 +640,7 @@ function reasoningBlock(text) {
   return `<details class="reasoning"><summary>${esc(t('chat.reasoning', { count: chars.toLocaleString(i18n.locale()) }))}</summary><pre>${esc(text)}</pre></details>`;
 }
 
-function addMessage(role, content, { streaming = false } = {}) {
+function addMessage(role, content, { streaming = false, attachments = null } = {}) {
   const wrap = $('#messages');
   const empty = $('#chat-empty');
   if (empty) empty.style.display = 'none';
@@ -599,7 +655,13 @@ function addMessage(role, content, { streaming = false } = {}) {
   wrap.appendChild(el);
   const body = el.querySelector('.msg-body');
   if (role === 'user') {
-    body.innerHTML = `<p>${esc(content).replace(/\n/g, '<br>')}</p>`;
+    const text = String(content || '').trim();
+    const chips = (attachments || []).length
+      ? `<div class="msg-attachments">${attachments.map((a) => (a.kind === 'image' && a.dataUrl
+        ? `<img class="msg-attach-img" src="${a.dataUrl}" alt="${esc(a.name)}" title="${esc(a.name)}">`
+        : `<span class="msg-attach-chip" title="${esc(a.name)}">${esc(MHAttachments.attachmentLabel(a))}</span>`)).join('')}</div>`
+      : '';
+    body.innerHTML = `${text ? `<p>${esc(text).replace(/\n/g, '<br>')}</p>` : ''}${chips}`;
   } else if (streaming) {
     body.innerHTML = '<div class="typing"><i></i><i></i><i></i></div>';
   } else {
@@ -607,6 +669,63 @@ function addMessage(role, content, { streaming = false } = {}) {
   }
   scrollChat();
   return { el, body };
+}
+
+/* --------------------------- Anhänge --------------------------- */
+
+const ATTACH_LIMIT = 8;
+
+/** Chips über dem Eingabefeld: was an die nächste Nachricht angehängt wird. */
+function renderAttachBar() {
+  const bar = $('#attach-bar');
+  if (!bar) return;
+  const list = state.chat.attachments;
+  bar.hidden = !list.length;
+  bar.innerHTML = list.map((att, i) => {
+    const thumb = att.kind === 'image' && att.dataUrl
+      ? `<img class="attach-thumb" src="${att.dataUrl}" alt="">`
+      : `<span class="attach-ext">${esc((att.ext || '').replace('.', '').toUpperCase() || 'FILE')}</span>`;
+    return `<span class="attach-chip${att.error ? ' is-error' : ''}">
+      ${thumb}
+      <span class="attach-label" title="${esc(att.name || '')}">${esc(att.error ? att.error : MHAttachments.attachmentLabel(att))}</span>
+      <button type="button" class="attach-x" data-act="attach-remove" data-idx="${i}" title="${esc(t('chat.attachRemove'))}" aria-label="${esc(t('chat.attachRemove'))}">×</button>
+    </span>`;
+  }).join('');
+}
+
+/** Gelesene Anhänge übernehmen; kaputte Dateien und Bilder ohne Vision-Modell abweisen. */
+function addAttachments(list) {
+  for (const att of (list || [])) {
+    if (att.error) { toast(`${att.name}: ${att.error}`, 'err'); continue; }
+    if (att.kind === 'image' && !state.server.vision) { toast(t('chat.attachNoVision'), 'err'); continue; }
+    if (state.chat.attachments.length >= ATTACH_LIMIT) { toast(t('chat.attachLimit', { max: ATTACH_LIMIT }), 'err'); break; }
+    state.chat.attachments.push(att);
+  }
+  renderAttachBar();
+  renderChatState();
+}
+
+async function pickAttachments(mode) {
+  try {
+    const list = await bridge.attachments.pick(mode);
+    if (list && list.length) addAttachments(list);
+  } catch (e) {
+    toast(e.message || String(e), 'err');
+  }
+}
+
+/** Dateien per Drag&Drop: Electron 32+ liefert keinen file.path mehr, nur webUtils. */
+async function dropAttachments(ev) {
+  ev.preventDefault();
+  const files = [...((ev.dataTransfer && ev.dataTransfer.files) || [])];
+  if (!files.length) return;
+  const paths = files.map((f) => bridge.attachments.pathForFile(f)).filter(Boolean);
+  if (!paths.length) { toast(t('chat.attachDropFailed'), 'err'); return; }
+  try {
+    addAttachments(await bridge.attachments.read(paths));
+  } catch (e) {
+    toast(e.message || String(e), 'err');
+  }
 }
 
 function scrollChat(force = false) {
@@ -642,10 +761,20 @@ function restoreComposerFocus() {
 async function sendMessage() {
   const input = $('#input');
   const text = input.value.trim();
-  if (!text || !state.server.running || state.chat.streaming) return;
+  const atts = state.chat.attachments;
+  // Eine Nachricht darf auch nur aus einem Anhang bestehen (z. B. „fasse das zusammen“).
+  if ((!text && !atts.length) || !state.server.running || state.chat.streaming) return;
 
-  state.chat.messages.push({ role: 'user', content: text });
-  addMessage('user', text);
+  const files = atts.filter((a) => a.kind !== 'image');
+  const images = atts.filter((a) => a.kind === 'image');
+  // Text/PDF/DOCX gehen als markierte Textblöcke in den Prompt, Bilder als
+  // OpenAI-kompatibles image_url — beides baut ui/chat-attachments.js.
+  const content = MHAttachments.composeContent(text, { files, images });
+
+  state.chat.messages.push({ role: 'user', content });
+  addMessage('user', text, { attachments: atts });
+  state.chat.attachments = [];
+  renderAttachBar();
   input.value = '';
   input.style.height = 'auto';
   input.focus();   // Fokus bleibt nach dem Senden im Eingabefeld
@@ -1370,6 +1499,21 @@ function renderServer() {
   const modelOptions = models.map((m) => `<option value="${esc(m.id)}"${m.id === state.serverModelId ? ' selected' : ''}>${esc(m.repo)} · ${esc(m.file)} · ${esc(backendText(backendDesc(m)))}${m.external ? ` (${esc(t('models.externalBadge'))})` : ''}</option>`).join('');
   const presetOptions = (state.presets || []).map((p) => `<option value="${esc(p.id)}"${p.id === presetId ? ' selected' : ''}>${esc(p.name || p.id)}</option>`).join('');
 
+  // Backend-Auswahl: nur was zum Modelltyp passt — ONNX-Ordner laufen immer über
+  // ONNX Runtime, GGUF-Modelle immer über llama.cpp (dort ist die Variante wählbar).
+  const selModel = models.find((m) => m.id === state.serverModelId);
+  const isOnnxModel = !!(selModel && selModel.isOnnx);
+  const installedBackends = (state.backends && state.backends.installed) || [];
+  const backendPref = (state.settings && state.settings.backendPreference) || 'auto';
+  const hwPrimary = state.hw && state.hw.recommendation ? state.hw.recommendation.primary : null;
+  const llamaBackends = installedBackends.filter((b) => window.MODELBACKEND.isLlamaBackend(b));
+  const autoBackend = llamaBackends.find((b) => b.id === hwPrimary) || llamaBackends[0] || null;
+  const autoShort = autoBackend ? window.MODELBACKEND.shortName(autoBackend.id, autoBackend.label) : '';
+  const backendOptions = llamaBackends.length
+    ? `<option value="auto"${backendPref === 'auto' ? ' selected' : ''}>${esc(t('server.backendAuto', { name: autoShort || t('server.backendAutoNone') }))}</option>`
+      + llamaBackends.map((b) => `<option value="${esc(b.id)}"${b.id === backendPref ? ' selected' : ''}>${esc(window.MODELBACKEND.shortName(b.id, b.label))} — ${esc(b.label || b.id)}</option>`).join('')
+    : `<option value="auto">${esc(t('server.backendNone'))}</option>`;
+
   body.innerHTML = `
     <div class="card srv-card">
       <div class="card-title">${esc(t('server.model'))}</div>
@@ -1382,7 +1526,14 @@ function renderServer() {
         <button class="btn btn-primary" id="srv-start" data-act="srv-start">${esc(t('server.start'))}</button>
         <button class="btn btn-danger-ghost" id="srv-stop" data-act="srv-stop">${esc(t('server.stop'))}</button>
       </div>` : `<p class="srv-note">${esc(t('server.noModels'))}</p>`}
-      ${state.server.running && state.server.backend ? `<p class="srv-hint">${esc(t('server.backend'))}: ${runningBackendBadge(state.server.backend)}</p>` : ''}
+      ${models.length ? `
+      <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('server.backend'))}</strong><span>${esc(isOnnxModel ? t('server.backendOnnxHint') : t('server.backendHint'))}</span></div>
+        <select id="srv-backend" class="srv-select srv-backend" aria-label="${esc(t('server.backend'))}"${isOnnxModel || !llamaBackends.length ? ' disabled' : ''}>
+          ${isOnnxModel ? `<option>${esc(t('server.backendOnnx'))}</option>` : backendOptions}
+        </select>
+      </div>` : ''}
+      ${state.server.running && state.server.backend ? `<p class="srv-hint">${esc(t('server.backendRunning'))}: ${runningBackendBadge(state.server.backend)}</p>` : ''}
       <p class="srv-hint">${esc(t('server.chatUsesSame'))}</p>
     </div>
 
@@ -1442,9 +1593,23 @@ function renderServer() {
   const corsOrigins = $('#srv-cors-origins');
   if (corsOrigins) corsOrigins.addEventListener('change', () => applyServerConfig({ corsOrigins: corsOrigins.value.trim() }));
   const modelSel = $('#srv-model');
-  if (modelSel) modelSel.addEventListener('change', () => { state.serverModelId = modelSel.value; });
+  // Modellwechsel ändert den Typ (GGUF/ONNX) — die Backend-Auswahl muss neu aufbauen.
+  if (modelSel) modelSel.addEventListener('change', () => { state.serverModelId = modelSel.value; renderServer(); });
   const presetSel = $('#srv-preset');
   if (presetSel) presetSel.addEventListener('change', () => { state.serverPreset = presetSel.value; });
+  const backendSel = $('#srv-backend');
+  if (backendSel && !backendSel.disabled) {
+    backendSel.addEventListener('change', async () => {
+      try {
+        state.settings = await bridge.settings.set({ backendPreference: backendSel.value });
+        toast(t('server.backendSaved'), 'ok', 3200);
+        // Läuft schon ein Server, greift die Wahl erst beim nächsten Start.
+        if (state.server.running) toast(t('server.restartToApply'), 'info', 6000);
+        renderServer();
+        renderChatState();
+      } catch (err) { toast(err.message, 'error', 6000); }
+    });
+  }
 
   renderServerAgents();
   renderServerLogs();
@@ -1742,6 +1907,44 @@ function bindEvents() {
   $('#btn-send').addEventListener('click', () => {
     if (state.chat.streaming) stopGeneration();
     else sendMessage();
+  });
+
+  $('#bench-run').addEventListener('click', () => runBenchmark());
+  $('#bench-body').addEventListener('click', async (e) => {
+    const rm = e.target.closest('[data-act="bench-remove"]');
+    if (rm) {
+      state.bench.entries = await bridge.bench.remove(rm.dataset.id);
+      renderBench();
+      return;
+    }
+    if (e.target.closest('[data-act="bench-clear"]')) {
+      state.bench.entries = await bridge.bench.clear();
+      renderBench();
+      toast(t('bench.cleared'), 'ok', 3000);
+    }
+  });
+
+  $('#btn-attach-file').addEventListener('click', () => pickAttachments('files'));
+  $('#btn-attach-image').addEventListener('click', () => pickAttachments('images'));
+  $('#attach-bar').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act="attach-remove"]');
+    if (!btn) return;
+    state.chat.attachments.splice(Number(btn.dataset.idx), 1);
+    renderAttachBar();
+    renderChatState();
+  });
+  // Dateien direkt auf den Composer ziehen
+  const composerEl = $('#composer');
+  composerEl.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    composerEl.classList.add('is-drag');
+  });
+  composerEl.addEventListener('dragleave', (e) => {
+    if (!composerEl.contains(e.relatedTarget)) composerEl.classList.remove('is-drag');
+  });
+  composerEl.addEventListener('drop', (e) => {
+    composerEl.classList.remove('is-drag');
+    dropAttachments(e);
   });
   const input = $('#input');
   input.addEventListener('keydown', (e) => {
@@ -2095,9 +2298,197 @@ function setTab(tab) {
   if (tab === 'catalog') refreshCatalog();
 }
 
+/* --------------------------- Benchmark --------------------------- */
+
+const BENCH_CASE_KEYS = { short: 'bench.case.short', medium: 'bench.case.medium', long: 'bench.case.long' };
+
+function benchCaseLabel(id) {
+  const key = BENCH_CASE_KEYS[id];
+  return key ? t(key) : String(id);
+}
+
+function fmtNum(n, digits = 1) {
+  const v = Number(n);
+  if (!isFinite(v) || v === 0) return '—';
+  return v.toLocaleString(i18n.locale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function fmtWhen(iso) {
+  try {
+    return new Date(iso).toLocaleString(i18n.locale(), { dateStyle: 'short', timeStyle: 'short' });
+  } catch { return String(iso || ''); }
+}
+
+async function refreshBenchView() {
+  try {
+    state.bench.entries = await bridge.bench.list();
+  } catch { state.bench.entries = []; }
+  renderBench();
+}
+
+/** Messlauf starten/abbrechen. Gemessen wird immer das aktuell geladene Modell. */
+async function runBenchmark() {
+  if (state.bench.running) {
+    if (state.bench.abort) state.bench.abort.abort();
+    return;
+  }
+  if (!state.server.running || !state.server.port) {
+    toast(t('bench.needModel'), 'error', 6000);
+    return;
+  }
+  state.bench.running = true;
+  state.bench.results = [];
+  state.bench.startedAt = Date.now();
+  state.bench.abort = new AbortController();
+  renderBench();
+
+  try {
+    const apiKey = (state.serverConfig && state.serverConfig.apiKey) || '';
+    const summary = await window.BENCH.run({
+      port: state.server.port,
+      apiKey,
+      signal: state.bench.abort.signal,
+      onCase: (_c, res) => {
+        if (res) state.bench.results.push(res);
+        renderBench();
+      },
+    });
+    const loaded = (state.local || []).find((m) => m.path === state.server.model);
+    const desc = backendDesc(loaded);
+    const entry = {
+      id: `bench-${Date.now()}`,
+      at: new Date().toISOString(),
+      model: basename(state.server.model || ''),
+      modelId: state.serverModelId || '',
+      backend: state.server.backend || desc.backendId || '',
+      engine: desc.engine,
+      genTps: summary.genTps,
+      prefillTps: summary.prefillTps,
+      ttftMs: summary.ttftMs,
+      results: summary.results,
+    };
+    state.bench.entries = await bridge.bench.add(entry);
+    toast(t('bench.saved', { gen: fmtNum(summary.genTps) }), 'ok', 5200);
+  } catch (err) {
+    if (err && err.name === 'AbortError') toast(t('bench.aborted'), 'info', 4000);
+    else toast(t('bench.failed', { message: err.message || String(err) }), 'error', 9000);
+  } finally {
+    state.bench.running = false;
+    state.bench.abort = null;
+    renderBench();
+  }
+}
+
+function renderBench() {
+  const body = $('#bench-body');
+  if (!body) return;
+  const runBtn = $('#bench-run');
+  const bg = state.bench;
+  const model = state.server.model ? basename(state.server.model) : '';
+  const loaded = (state.local || []).find((m) => m.path === state.server.model);
+  const desc = loaded ? backendDesc(loaded) : null;
+
+  if (runBtn) {
+    runBtn.disabled = !state.server.running && !bg.running;
+    runBtn.textContent = bg.running ? t('bench.stop') : t('bench.run');
+    runBtn.classList.toggle('btn-danger-ghost', bg.running);
+    runBtn.classList.toggle('btn-primary', !bg.running);
+  }
+
+  const cases = window.BENCH.CASES;
+  const resultRows = cases.map((c) => {
+    const r = bg.results.find((x) => x.id === c.id);
+    const done = !!r;
+    return `<tr>
+      <td>${esc(benchCaseLabel(c.id))}</td>
+      <td>${done ? esc(String(r.promptTokens)) : '—'}</td>
+      <td>${done ? esc(String(r.completionTokens)) : '—'}</td>
+      <td>${done ? esc(fmtNum(r.ttftMs, 0)) : '—'}</td>
+      <td>${done ? esc(fmtNum(r.prefillTps)) : '—'}</td>
+      <td>${done ? esc(fmtNum(r.genTps)) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const entries = bg.entries || [];
+  const historyRows = entries.map((e) => `<tr>
+      <td>${esc(fmtWhen(e.at))}</td>
+      <td title="${esc(e.model)}">${esc(e.model || '—')}</td>
+      <td>${esc(shortBackendLabel(e.backend)) || '—'}</td>
+      <td>${esc(fmtNum(e.prefillTps))}</td>
+      <td>${esc(fmtNum(e.genTps))}</td>
+      <td>${esc(fmtNum(e.ttftMs, 0))}</td>
+      <td><button class="btn btn-ghost btn-sm" data-act="bench-remove" data-id="${esc(e.id)}" title="${esc(t('bench.remove'))}" aria-label="${esc(t('bench.remove'))}">×</button></td>
+    </tr>`).join('');
+
+  const live = bg.results.length
+    ? `<div class="bench-summary">
+        <div class="bench-kpi"><span>${esc(t('bench.prefill'))}</span><strong>${esc(fmtNum(bg.results.reduce((s, r) => s + r.prefillTps, 0) / bg.results.length))}</strong><em>tok/s</em></div>
+        <div class="bench-kpi"><span>${esc(t('bench.gen'))}</span><strong>${esc(fmtNum(bg.results.reduce((s, r) => s + r.genTps, 0) / bg.results.length))}</strong><em>tok/s</em></div>
+      </div>`
+    : '';
+
+  body.innerHTML = `
+    <div class="card srv-card">
+      <div class="card-title">${esc(t('bench.current'))}</div>
+      ${state.server.running ? `
+        <p class="srv-hint"><strong>${esc(model)}</strong>${desc ? ` · ${runningBackendBadge(state.server.backend || desc.backendId || '')}` : ''}</p>` : `<p class="srv-note">${esc(t('bench.needModel'))}</p>`}
+      <p class="srv-hint">${esc(t('bench.hint'))}</p>
+      ${benchProgress(bg, cases)}
+      ${live}
+      <table class="bench-table">
+        <thead><tr>
+          <th>${esc(t('bench.case'))}</th>
+          <th>${esc(t('bench.promptTokens'))}</th>
+          <th>${esc(t('bench.completionTokens'))}</th>
+          <th>${esc(t('bench.ttft'))}</th>
+          <th>${esc(t('bench.prefill'))} (tok/s)</th>
+          <th>${esc(t('bench.gen'))} (tok/s)</th>
+        </tr></thead>
+        <tbody>${resultRows}</tbody>
+      </table>
+    </div>
+
+    <div class="card srv-card">
+      <div class="card-title">${esc(t('bench.history'))}</div>
+      ${entries.length ? `
+      <table class="bench-table bench-history">
+        <thead><tr>
+          <th>${esc(t('bench.when'))}</th>
+          <th>${esc(t('bench.model'))}</th>
+          <th>${esc(t('bench.backend'))}</th>
+          <th>${esc(t('bench.prefill'))} (tok/s)</th>
+          <th>${esc(t('bench.gen'))} (tok/s)</th>
+          <th>${esc(t('bench.ttft'))}</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${historyRows}</tbody>
+      </table>
+      <div class="bench-actions">
+        <button class="btn btn-ghost btn-sm" data-act="bench-clear">${esc(t('bench.clear'))}</button>
+      </div>` : `<p class="srv-note">${esc(t('bench.empty'))}</p>`}
+    </div>`;
+}
+
+/** Fortschritt während des Laufs („Fall 2 von 3 läuft …“). */
+function benchProgress(bg, cases) {
+  if (!bg.running) return '';
+  const done = bg.results.length;
+  const key = done >= cases.length ? 'bench.finishing' : 'bench.progress';
+  return `<p class="srv-hint">${esc(t(key, { done, total: cases.length, name: benchCaseLabel((cases[done] || cases[cases.length - 1]).id) }))}</p>`;
+}
+
+/** Backend-Kurzname für Tabellen (ID → 'Vulkan', 'ONNX', …). */
+function shortBackendLabel(id) {
+  if (!id) return '';
+  const installed = (state.backends && state.backends.installed) || [];
+  const m = installed.find((b) => b.id === id);
+  return window.MODELBACKEND.shortName(id, m ? m.label : id);
+}
+
 /* --------------------------- Init --------------------------- */
 
 async function init() {
+  renderAttachBar();
   bindEvents();
   try {
     state.info = await bridge.info();
@@ -2111,6 +2502,9 @@ async function init() {
     if (st.running) {
       state.server = {
         running: true, starting: false, port: st.port, model: st.model, preset: st.preset,
+        // Backend mitschicken, sonst zeigt die Server-Karte nach einem Neustart der
+        // Oberfläche kein laufendes Backend an, bis das nächste state-Ereignis kommt.
+        backend: st.backend || null,
         lastModel: { path: st.model, id: null, fit: null }, unloading: false,
       };
     }

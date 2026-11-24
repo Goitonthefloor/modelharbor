@@ -93,6 +93,41 @@ right way.
   afterwards with one click. No update, no interruption. The setup view also offers a manual
   check (“Check for updates”).
 
+## Headless CLI and web mode (2.0)
+
+Servers usually have no desktop. The same code base therefore ships a command line
+tool, published as `model-harbor`:
+
+```bash
+npm install -g modelharbor      # or: node bin/model-harbor.js <command>
+model-harbor start              # interactive number menu
+model-harbor serve --lan        # serve the interface in a browser
+```
+
+`model-harbor start` opens a plain number menu — no hidden key bindings, so it works on
+any keyboard and over SSH:
+
+- **1 Models** — load, remove, per-model settings, extra model folders
+- **2 Backends** — installed builds, download, remove
+- **3 Server** — pick a model, start/stop the OpenAI-compatible API server, show port and key
+- **4 Search & download models** — HuggingFace search for GGUF and ONNX, resumable download
+- **5 Download backend** — llama.cpp builds for this machine, with a recommendation
+- **6 Benchmark** — tokens/s, prefill and TTFT for the loaded model
+- **7 Settings** — context, GPU layers, language, backend choice, model folders, server config
+- **8 Web interface** — starts `serve` and prints the URL
+- **9 Status & logs** — hardware, model folder usage, server log
+- **0 Quit** (end of input / Ctrl-D also quits cleanly)
+
+Every menu action also exists as a scriptable subcommand with `--json`:
+`status`, `models list|remove`, `backends list|download|remove`, `server start|stop|status`,
+`bench`, `config get|set`, `serve`. The CLI reads and writes the **same `settings.json`** as the
+desktop app, so models, backends and preferences are shared.
+
+`model-harbor serve` serves the existing interface (`ui/`) unchanged: it builds `window.api` over
+HTTP instead of Electron IPC, so the browser sees exactly the same app. It binds `127.0.0.1` by
+default; with `--lan` an API token is required (starting the server or deleting models over the
+network needs proof). If the port is taken, the next free one is used.
+
 ## Installation
 
 The ready-made packages live in `dist/`:

@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>ModelHarbor — Redesign · Variante A „Harbor Dämmerung“</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    color-scheme: dark;
+    --bg: #0a1120;
+    --bg-glow: radial-gradient(1100px 500px at 80% -10%, rgba(255,196,107,.07), transparent 60%),
+               radial-gradient(800px 420px at -10% 115%, rgba(64,150,255,.06), transparent 55%);
+    --elev: #0e1626;
+    --panel: #131d30;
+    --panel-2: #1a2539;
+    --panel-3: #223048;
+    --border: rgba(151,180,220,.14);
+    --border-soft: rgba(151,180,220,.09);
+    --text: #eaf1fb;
+    --text-dim: #b9c7db;
+    --muted: #8294ae;
+    --accent: #ffc46b;        /* Leuchtfeuer */
+    --accent-ink: #241500;
+    --accent-2: #ffd89d;
+    --water: #4aa3ff;         /* Wasser/Türkis-Basis */
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --r-lg: 22px;
+    --r-md: 15px;
+    --r-sm: 10px;
+    --shadow: 0 18px 50px rgba(2,6,16,.5);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --density: spacious;
+    --sp-1: 10px; --sp-2: 18px; --sp-3: 28px;
+  }
+  :where([data-density="compact"]) {
+    --sp-1: 7px; --sp-2: 11px; --sp-3: 16px;
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font);
+    background: var(--bg-glow), var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  :where(button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
+  /* ---------- App-Shell ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 248px 1fr;
+    height: 100dvh;
+  }
+  .sidebar {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 22px 16px 18px;
+    background: linear-gradient(180deg, rgba(14,22,38,.92), rgba(10,17,32,.72));
+    border-right: 1px solid var(--border-soft);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; padding: 2px 10px 22px; }
+  .brand-mark {
+    width: 40px; height: 40px; border-radius: 13px;
+    display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: var(--accent-ink);
+    box-shadow: 0 8px 22px rgba(255,196,107,.28), inset 0 0 0 1px rgba(255,255,255,.25);
+  }
+  .brand-name { font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+  .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: .35px; text-transform: uppercase; }
+
+  .nav { display: flex; flex-direction: column; gap: 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 13px; border-radius: 12px;
+    color: var(--text-dim); text-align: left;
+    transition: background .15s, color .15s;
+    font-weight: 520;
+  }
+  .nav-item:hover { background: rgba(255,255,255,.04); color: var(--text); }
+  .nav-item.is-active {
+    background: linear-gradient(135deg, rgba(255,196,107,.14), rgba(255,196,107,.05));
+    color: var(--accent-2);
+    box-shadow: inset 0 0 0 1px rgba(255,196,107,.22);
+  }
+  .nav-item svg { opacity: .95; }
+
+  .side-status { margin-top: auto; padding: 14px 10px 2px; border-top: 1px solid var(--border-soft); }
+  .status-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--text-dim); }
+  .status-row + .status-row { margin-top: 9px; }
+  .status-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); width: 76px; flex: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 9px rgba(74,222,128,.7); }
+  .dot.idle { background: #4b5a72; }
+  .dot.warn { background: var(--warn); }
+
+  .main { display: flex; flex-direction: column; min-width: 0; }
+
+  /* ---------- Topbar ---------- */
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 15px 26px;
+    border-bottom: 1px solid var(--border-soft);
+    background: rgba(10,17,32,.66);
+    backdrop-filter: blur(12px);
+  }
+  .model-chip {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 8px 15px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border);
+    font-size: 13px; color: var(--text-dim);
+    max-width: 420px;
+  }
+  .model-chip .dot { background: var(--ok); box-shadow: 0 0 10px rgba(74,222,128,.8); }
+  .model-chip strong { color: var(--text); font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 15px; border-radius: 11px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    font-weight: 560; font-size: 13px; color: var(--text);
+    transition: background .15s, border-color .15s, scale .08s ease-out;
+  }
+  .btn:hover { background: var(--panel-3); }
+  .btn:active { scale: .97; }
+  .btn.ghost { background: transparent; }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: var(--accent-ink); border-color: transparent; font-weight: 650;
+  }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.ok { background: linear-gradient(135deg, #34d399, #2dd4bf); color: #04211d; border-color: transparent; font-weight: 650; }
+  .btn.danger-ghost { background: transparent; color: #fca5a5; border-color: rgba(248,113,113,.28); }
+  .btn.danger-ghost:hover { background: rgba(248,113,113,.1); }
+
+  .select {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 12px; color: var(--text); font-size: 13px; outline: none;
+  }
+
+  /* ---------- Views ---------- */
+  .view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  .view.active { display: flex; }
+  .view-scroll { flex: 1; overflow-y: auto; scrollbar-gutter: stable; overscroll-behavior: contain; }
+
+  /* ---------- Chat ---------- */
+  .messages { max-width: 780px; margin: 0 auto; padding: 30px 28px 14px; display: flex; flex-direction: column; gap: 24px; width: 100%; }
+  .msg { display: flex; flex-direction: column; gap: 7px; animation: rise .25s ease; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  .msg-role { font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .msg-role .who-ai { color: var(--accent); }
+  .msg-role .who-user { color: var(--water); }
+  .msg-body { font-size: 14.5px; line-height: 1.7; overflow-wrap: anywhere; }
+  .msg-user .msg-body {
+    background: var(--panel-2); border: 1px solid var(--border-soft);
+    padding: 13px 17px; border-radius: 17px; border-top-left-radius: 5px;
+    align-self: flex-start; max-width: 88%;
+  }
+  .msg-assistant .msg-body { padding: 2px 2px 0; }
+  .msg-body code { font-family: var(--mono); font-size: 12.6px; background: #1a2539; border: 1px solid rgba(151,180,220,.14); border-radius: 6px; padding: 1.5px 5px; }
+  .msg-body pre { background: #0d1526; border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; overflow-x: auto; margin: 10px 0; }
+  .msg-body ul { margin: 8px 0 10px; padding-left: 22px; }
+
+  .composer-wrap { padding: 10px 26px 18px; }
+  .composer {
+    max-width: 780px; margin: 0 auto;
+    display: flex; align-items: flex-end; gap: 10px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
+    padding: 10px 10px 10px 18px;
+    box-shadow: var(--shadow);
+  }
+  .composer:focus-within { border-color: rgba(255,196,107,.5); box-shadow: 0 0 0 3px rgba(255,196,107,.09), var(--shadow); }
+  .composer textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; max-height: 180px; padding: 7px 0; line-height: 1.55; }
+  .composer textarea::placeholder { color: #5d6d86; }
+  .send { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; }
+
+  /* ---------- Seiten-Kopf + Tabs ---------- */
+  .page-head {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 14px;
+    padding: 30px 34px 14px;
+  }
+  .page-head h1 { font-size: 26px; font-weight: 700; letter-spacing: -.4px; }
+  .page-sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .tabs { display: flex; gap: 5px; padding: 10px 34px 0; }
+  .tab {
+    position: relative; padding: 10px 16px; border-radius: 12px 12px 0 0;
+    color: var(--muted); font-weight: 520; font-size: 13.5px;
+  }
+  .tab:hover { color: var(--text); background: rgba(255,255,255,.03); }
+  .tab[aria-selected="true"] { color: var(--text); }
+  .tab[aria-selected="true"]::after {
+    content: ""; position: absolute; inset: auto 0 0;
+    border-block-end: 3px solid var(--accent);
+    border-radius: 3px 3px 0 0;
+  }
+  .tab-count { font-size: 11px; color: var(--muted); margin-left: 5px; }
+
+  /* ---------- Modell-Karten ---------- */
+  .tab-body { padding: 20px 34px 40px; display: none; }
+  .tab-body.active { display: block; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--sp-2);
+  }
+  .card {
+    container: card / inline-size;
+    background: linear-gradient(180deg, var(--panel), rgba(19,29,48,.82));
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg);
+    padding: var(--sp-3);
+    display: flex; flex-direction: column; gap: 12px;
+    transition: border-color .15s, transform .15s, background .15s;
+  }
+  .card:hover { border-color: rgba(255,196,107,.3); transform: translateY(-2px); }
+  .card-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .card-title { font-size: clamp(15px, 5.5cqi, 18px); font-weight: 660; letter-spacing: -.2px; }
+  .card-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .card-desc { font-size: 13px; color: var(--text-dim); line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2; overflow: clip; }
+  .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+  .card-size { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge.gpu { color: #86efac; background: rgba(74,222,128,.1); border-color: rgba(74,222,128,.28); }
+  .badge.hybrid { color: #fde68a; background: rgba(251,191,36,.1); border-color: rgba(251,191,36,.28); }
+  .badge.ram { color: #93c5fd; background: rgba(96,165,250,.1); border-color: rgba(96,165,250,.28); }
+  .badge.neutral { color: var(--text-dim); background: rgba(255,255,255,.04); border-color: var(--border); }
+  .fit-note { font-size: 12px; color: var(--muted); }
+  .progress { height: 6px; background: #1a2539; border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 68%; background: linear-gradient(90deg, var(--accent), var(--water)); border-radius: 999px; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  /* ---------- Setup ---------- */
+  .setup { padding: 8px 34px 40px; max-width: 900px; }
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin: 26px 0 12px; font-weight: 650; }
+  .hw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .hw-card { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-md); padding: var(--sp-2); }
+  .hw-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 6px; }
+  .hw-value { font-size: 14.5px; font-weight: 600; }
+  .hw-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .backend-card {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-md);
+    padding: var(--sp-2) var(--sp-3); margin-bottom: 10px;
+  }
+  .backend-card.rec { border-color: rgba(255,196,107,.35); background: linear-gradient(135deg, rgba(255,196,107,.07), transparent 55%); }
+  .backend-name { font-weight: 620; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .backend-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .backend-side { margin-inline-start: auto; display: flex; align-items: center; gap: 10px; }
+
+  /* ---------- Toast ---------- */
+  .toast-wrap { position: fixed; right: 22px; bottom: 22px; z-index: 40; pointer-events: none; }
+  .toast[popover] {
+    position: fixed; inset: auto 22px 22px auto; margin: 0;
+    min-width: 250px; max-width: 400px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 13px;
+    padding: 12px 15px; box-shadow: var(--shadow); font-size: 13px;
+    color: var(--text); display: flex; align-items: center; gap: 10px;
+    animation: rise .22s ease; pointer-events: auto;
+  }
+  .toast.is-ok { border-color: rgba(74,222,128,.4); }
+  .toast-msg { flex: 1; }
+  .toast-close { color: var(--muted); font-size: 15px; width: 22px; height: 22px; border-radius: 6px; }
+  .toast-close:hover { background: rgba(255,255,255,.07); color: var(--text); }
+
+  /* ---------- Dichte-Toggle ---------- */
+  .density-toggle { display: inline-flex; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
+  .density-toggle button { padding: 5px 11px; border-radius: 999px; font-size: 11.5px; color: var(--muted); font-weight: 560; }
+  .density-toggle button.on { background: var(--panel-3); color: var(--text); }
+
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 68px 1fr; }
+    .brand-text, .nav-item span, .side-status { display: none; }
+    .brand { justify-content: center; padding: 2px 0 18px; }
+    .nav-item { justify-content: center; }
+  }
+</style>
+</head>
+<body data-density="spacious">
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2.5 4 7v10l8 4.5 8-4.5V7l-8-4.5Z"/><path d="M4 7l8 4.5L20 7M12 11.5v10"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name">ModelHarbor</div>
+        <div class="brand-sub">Dein Hafen für KI</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item is-active" data-view="chat">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 9 9 0 0 1-3.8-.8L3 21l1.9-5.7a8.3 8.3 0 0 1-.9-3.8A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z"/></svg>
+        <span>Chat</span>
+      </button>
+      <button class="nav-item" data-view="models">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg>
+        <span>Modelle</span>
+      </button>
+      <button class="nav-item" data-view="setup">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        <span>Einrichtung</span>
+      </button>
+    </nav>
+
+    <div class="side-status">
+      <div class="status-row"><span class="status-label">Modell</span><span class="dot live"></span><span>Qwen3 8B · am Kai</span></div>
+      <div class="status-row"><span class="status-label">Backend</span><span class="dot live"></span><span>CUDA · 12 GB VRAM</span></div>
+      <div class="status-row"><span class="status-label">Hafen</span><span class="dot idle"></span><span>llama-server · :9931</span></div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <!-- ============ CHAT ============ -->
+    <section class="view active" id="view-chat">
+      <header class="topbar">
+        <div class="model-chip"><span class="dot"></span><strong>Qwen3 8B</strong><span>· Q4_K_M</span></div>
+        <div class="spacer"></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)">Preset
+          <select class="select"><option>Balanced</option><option>Kreativ</option><option>Deterministisch</option></select>
+        </label>
+        <button class="btn ghost">Modell wechseln</button>
+        <button class="btn danger-ghost">Entladen</button>
+        <div class="density-toggle" title="Dichte umschalten">
+          <button data-density="compact">Kompakt</button>
+          <button data-density="spacious" class="on">Großzügig</button>
+        </div>
+      </header>
+
+      <div class="view-scroll">
+        <div class="messages">
+          <div class="msg msg-user">
+            <div class="msg-role"><span class="who-user">Du</span></div>
+            <div class="msg-body">Wie viel VRAM braucht Qwen3 8B bei 8192 Kontext?</div>
+          </div>
+          <div class="msg msg-assistant">
+            <div class="msg-role"><span class="who-ai">Qwen3 8B</span></div>
+            <div class="msg-body">
+              <p>Rechne grob so:</p>
+              <pre><code>Bedarf ≈ Dateigröße + KV-Cache + Overhead
+KV-Cache ≈ 8 Mrd. × 0,045 GB × (8192 / 4096) ≈ 0,72 GB</code></pre>
+              <ul>
+                <li><strong>Q4_K_M</strong> (4,9 GB): passt komplett in 12 GB VRAM</li>
+                <li><strong>Q6_K</strong> (6,7 GB): auch noch, mit weniger Reserve</li>
+                <li><strong>Q8_0</strong> (8,6 GB): wird auf einer 12-GB-Karte eng</li>
+              </ul>
+              <p>ModelHarbor markiert dir das vor dem Download direkt auf der Karte.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea rows="1" placeholder="Nachricht schreiben … (Enter = senden)"></textarea>
+          <button class="btn primary send">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ MODELLE ============ -->
+    <section class="view" id="view-models">
+      <header class="page-head">
+        <div>
+          <h1>Modelle</h1>
+          <p class="page-sub">Empfehlungen passend zu deiner Hardware · NVIDIA 12 GB</p>
+        </div>
+        <div style="display:flex;gap:9px;align-items:center">
+          <div class="density-toggle" title="Dichte umschalten">
+            <button data-density="compact">Kompakt</button>
+            <button data-density="spacious" class="on">Großzügig</button>
+          </div>
+          <button class="btn ghost">Ordner öffnen</button>
+        </div>
+      </header>
+
+      <div style="display:flex;gap:5px;padding:12px 34px 0">
+        <button class="tab" role="tab" aria-selected="true">Empfohlen</button>
+        <button class="tab" role="tab" aria-selected="false">HuggingFace durchsuchen</button>
+        <button class="tab" role="tab" aria-selected="false">Installiert <span class="tab-count">2</span></button>
+      </div>
+
+      <div class="view-scroll">
+        <div class="tab-body active" style="padding:22px 34px 40px">
+          <div class="grid">
+            <article class="card">
+              <div class="card-top">
+                <div>
+                  <div class="card-title">Qwen3 8B</div>
+                  <div class="card-meta">8 Mrd. · Qwen3 · Q4_K_M</div>
+                </div>
+                <span class="badge gpu">GPU</span>
+              </div>
+              <p class="card-desc">Schnelles Allround-Modell für Chat, Code und Übersetzungen — der zuverlässige Alltagshafen.</p>
+              <div class="fit-note">Passt komplett in den VRAM · 4,9 GB</div>
+              <div class="card-foot">
+                <span class="card-size">4,9 GB</span>
+                <button class="btn primary">Chat öffnen</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-top">
+                <div>
+                  <div class="card-title">Qwen3 Coder 14B</div>
+                  <div class="card-meta">14 Mrd. · Qwen3 · Q6_K</div>
+                </div>
+                <span class="badge hybrid">Hybrid</span>
+              </div>
+              <p class="card-desc">Stark beim Programmieren, nutzt GPU und RAM gemeinsam — etwas mehr Kontextkosten.</p>
+              <div class="fit-note">Teilweise auf der GPU · 6,7 GB</div>
+              <div class="card-foot">
+                <span class="card-size">6,7 GB</span>
+                <button class="btn">Herunterladen</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-top">
+                <div>
+                  <div class="card-title">Llama 3.1 8B</div>
+                  <div class="card-meta">8 Mrd. · Llama · Q4_K_M</div>
+                </div>
+                <span class="badge gpu">GPU</span>
+              </div>
+              <p class="card-desc">Solides Basismodell mit ruhigem Ton — gut für längere Gespräche und Zusammenfassungen.</p>
+              <div class="fit-note">Passt komplett in den VRAM · 4,7 GB</div>
+              <div class="card-foot">
+                <span class="card-size">4,7 GB</span>
+                <button class="btn">Herunterladen</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-top">
+                <div>
+                  <div class="card-title">Mistral 7B</div>
+                  <div class="card-meta">7 Mrd. · Mistral · Q5_K_M</div>
+                </div>
+                <span class="badge ram">RAM</span>
+              </div>
+              <p class="card-desc">Leichtfüßig und schnell — ideal, wenn die GPU gerade andere Fracht trägt.</p>
+              <div class="fit-note">Läuft im Arbeitsspeicher · 5,2 GB</div>
+              <div class="card-foot">
+                <span class="card-size">5,2 GB</span>
+                <button class="btn">Herunterladen</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-top">
+                <div>
+                  <div class="card-title">Qwen3 32B</div>
+                  <div class="card-meta">32 Mrd. · Qwen3 · Q4_K_M</div>
+                </div>
+                <span class="badge hybrid">Hybrid</span>
+              </div>
+              <p class="card-desc">Mehr Denktiefe für anspruchsvolle Fragen — braucht dafür mehr Platz im Hafen.</p>
+              <div class="fit-note">Teilweise auf der GPU · 19 GB</div>
+              <div class="card-foot">
+                <span class="card-size">19 GB</span>
+                <button class="btn">Herunterladen</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-top">
+                <div>
+                  <div class="card-title">DeepSeek R1 Distill 7B</div>
+                  <div class="card-meta">7 Mrd. · DeepSeek · Q4_K_M</div>
+                </div>
+                <span class="badge gpu">GPU</span>
+              </div>
+              <p class="card-desc">Denkt laut mit — zeigt seinen Gedankengang, wenn du ihn nachvollziehen willst.</p>
+              <div class="fit-note">Passt komplett in den VRAM · 4,7 GB</div>
+              <div class="progress"><div class="progress-fill"></div></div>
+              <div class="progress-label"><span>deepseek-r1…Q4_K_M.gguf</span><span>68 % · 3,2 / 4,7 GB</span></div>
+              <div class="card-foot">
+                <span class="card-size">4,7 GB</span>
+                <button class="btn" disabled style="opacity:.55;cursor:not-allowed">Lädt …</button>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ EINRICHTUNG ============ -->
+    <section class="view" id="view-setup">
+      <header class="page-head">
+        <div>
+          <h1>Einrichtung</h1>
+          <p class="page-sub">Hardware prüfen, Backend wählen, Speicher festlegen</p>
+        </div>
+        <button class="btn ghost">Neu erkennen</button>
+      </header>
+      <div class="view-scroll">
+        <div class="setup">
+          <h3 class="section-title">Dein System</h3>
+          <div class="hw-grid">
+            <div class="hw-card"><div class="hw-label">System</div><div class="hw-value">Windows 11</div><div class="hw-sub">x64 · 16 Threads</div></div>
+            <div class="hw-card"><div class="hw-label">Prozessor</div><div class="hw-value">Ryzen 7 5800X3D</div><div class="hw-sub">8 Kerne</div></div>
+            <div class="hw-card"><div class="hw-label">Arbeitsspeicher</div><div class="hw-value">32 GB</div><div class="hw-sub">24 GB frei</div></div>
+            <div class="hw-card"><div class="hw-label">Grafik</div><div class="hw-value">RTX 4070</div><div class="hw-sub">NVIDIA · 12 GB VRAM</div></div>
+          </div>
+
+          <h3 class="section-title">Backend (llama.cpp)</h3>
+          <div class="backend-card rec">
+            <div>
+              <div class="backend-name">CUDA 12.4 <span class="badge gpu">Empfohlen</span><span class="badge neutral">installiert</span></div>
+              <div class="backend-note">Deutlich schneller als Vulkan auf NVIDIA-Karten.</div>
+            </div>
+            <div class="backend-side"><span class="card-size">278 MB</span><button class="btn ghost">Entfernen</button></div>
+          </div>
+          <div class="backend-card">
+            <div>
+              <div class="backend-name">Vulkan <span class="badge neutral">installiert</span></div>
+              <div class="backend-note">Fallback, wenn ein Treiber zickt.</div>
+            </div>
+            <div class="backend-side"><span class="card-size">241 MB</span><button class="btn ghost">Entfernen</button></div>
+          </div>
+
+          <h3 class="section-title">Einstellungen</h3>
+          <div class="backend-card">
+            <div>
+              <div class="backend-name">Modellordner</div>
+              <div class="backend-note" style="font-family:var(--mono);font-size:11.5px">C:\Users\Rolf\.config\ModelHarbor\models</div>
+            </div>
+            <div class="backend-side"><button class="btn ghost">Ändern</button><button class="btn ghost">Öffnen</button></div>
+          </div>
+          <div class="backend-card">
+            <div>
+              <div class="backend-name">Kontextgröße <span style="color:var(--muted);font-weight:400">· Tokens, die das Modell gleichzeitig sieht</span></div>
+            </div>
+            <div class="backend-side"><select class="select"><option>8192</option><option>16384</option><option>32768</option></select></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script>
+  // View-Wechsel
+  document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('is-active', x === b));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + b.dataset.view));
+  }));
+
+  // Tabs
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', x === t ? 'true' : 'false'));
+  }));
+
+  // Dichte-Toggle (Design-Token: --density auf <body>)
+  const applyDensity = d => {
+    document.body.dataset.density = d;
+    document.querySelectorAll('.density-toggle button').forEach(b =>
+      b.classList.toggle('on', b.dataset.density === d));
+  };
+  document.querySelectorAll('.density-toggle button').forEach(b =>
+    b.addEventListener('click', () => applyDensity(b.dataset.density)));
+
+  // Toast-Demo
+  let seq = 0;
+  const showToast = msg => {
+    const wrap = document.getElementById('toast-wrap');
+    const el = document.createElement('div');
+    el.className = 'toast is-ok';
+    el.setAttribute('popover', 'manual');
+    el.id = 't' + (++seq);
+    el.innerHTML = '<span class="toast-msg">' + msg + '</span>' +
+      '<button class="toast-close" popovertarget="' + el.id + '" popovertargetaction="hide" aria-label="Schließen">×</button>';
+    wrap.appendChild(el);
+    el.showPopover();
+    el.querySelector('.toast-close').addEventListener('click', () => el.remove());
+    setTimeout(() => { el.remove(); }, 4000);
+  };
+
+  document.querySelectorAll('.card .btn, .composer .send, .topbar .btn, .backend-side .btn').forEach(b => {
+    if (b.disabled) return;
+    b.addEventListener('click', () => showToast(b.textContent.trim() ? 'OK — ' + b.textContent.trim() : 'Nachricht gesendet'));
+  });
+</script>
+</body>
+</html>

@@ -13,6 +13,8 @@ const logger = require('./logger');
 const { childPath, withinRoot, withinAnyRoot } = require('./paths');
 const { isAppUrl } = require('./window-guard');
 const ms = require('./model-settings');
+const attachments = require('./attachments');
+const benchmarks = require('./benchmarks');
 const sc = require('./server-config');
 const gguf = require('./gguf-meta');
 const { PRESETS } = require('./presets');
@@ -92,6 +94,9 @@ function defaultSettings() {
     language: 'de',
     debugLog: false,
     extraModelDirs: [],
+    // Backend-Wahl im Server-Tab: 'auto' = Empfehlung der Hardware-Erkennung,
+    // sonst die ID eines installierten Backends (z. B. 'linux-vulkan').
+    backendPreference: 'auto',
     server: { ...sc.DEFAULTS },
   };
 }
@@ -243,6 +248,23 @@ function handle(channel, fn) {
     if (!isAppUrl(url, APP_FILE)) throw new Error(i18n.t('error.untrustedSender'));
     return fn(event, ...args);
   });
+}
+
+/**
+ * Anhänge einlesen. Eine kaputte Datei darf die Auswahl nicht kippen: sie kommt
+ * als { name, error } zurück, der Rest wird normal gelesen.
+ */
+const MAX_ATTACHMENTS = 8;
+async function readAttachments(filePaths) {
+  const out = [];
+  for (const p of filePaths.slice(0, MAX_ATTACHMENTS)) {
+    try {
+      out.push(await attachments.readAttachment(await fsp.realpath(p)));
+    } catch (e) {
+      out.push({ name: path.basename(String(p)), error: e.message });
+    }
+  }
+  return out;
 }
 
 /** ONNX-/OGA-Modellordner: Verzeichnis mit genai_config.json (wie server.js). */
@@ -457,7 +479,11 @@ function registerIpc() {
     // es nie bekommen (llama.cpp kann keinen ONNX-Ordner laden). Die Wahl passiert in
     // backends.pickForModel, damit die Badges in der Oberfläche dasselbe sagen.
     const isOnnx = !!(opts.isOnnx || isOnnxModelDir(modelPath));
-    const primary = opts.backendId || (hwCache && hwCache.recommendation ? hwCache.recommendation.primary : null);
+    // Reihenfolge: explizite Wahl im Aufruf → gespeicherte Backend-Präferenz des
+    // Nutzers (Server-Tab) → Empfehlung der Hardware-Erkennung.
+    const pref = opts.backendId
+      || (settings.backendPreference && settings.backendPreference !== 'auto' ? settings.backendPreference : null);
+    const primary = pref || (hwCache && hwCache.recommendation ? hwCache.recommendation.primary : null);
     const backend = backends.pickForModel(installed, { primary, isOnnx });
     if (!backend) throw new Error(i18n.t(isOnnx ? 'error.onnxBackendMissing' : 'error.noBackend'));
     // ctx/gpuLayers aus dem Renderer sind die globalen Werte (bzw. die
@@ -501,6 +527,27 @@ function registerIpc() {
   });
 
   handle('server:generateKey', async () => ({ key: sc.generateKey() }));
+
+  /* ------------------- Chat-Anhänge (Dateien, Bilder) ------------------- */
+
+  handle('attachments:pick', async (_e, mode) => {
+    const res = await dialog.showOpenDialog(win, {
+      properties: ['openFile', 'multiSelections'],
+      filters: attachments.dialogFilters(mode),
+    });
+    if (res.canceled || !res.filePaths.length) return [];
+    return readAttachments(res.filePaths);
+  });
+
+  handle('attachments:read', async (_e, paths) =>
+    readAttachments(Array.isArray(paths) ? paths : []));
+
+  /* ------------------- Benchmark-Ergebnisse ------------------- */
+
+  handle('bench:list', () => benchmarks.list(userDataDir()));
+  handle('bench:add', (_e, entry) => benchmarks.add(userDataDir(), entry || {}));
+  handle('bench:remove', (_e, id) => benchmarks.remove(userDataDir(), String(id || '')));
+  handle('bench:clear', () => benchmarks.clear(userDataDir()));
 
   handle('dialog:pickFolder', async () => {
     const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });

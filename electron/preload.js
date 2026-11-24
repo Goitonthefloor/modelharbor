@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const ALLOWED_EVENTS = new Set([
   'download:progress',
@@ -50,6 +50,21 @@ contextBridge.exposeInMainWorld('api', {
     setConfig: (patch) => ipcRenderer.invoke('server:setConfig', patch),
     generateKey: () => ipcRenderer.invoke('server:generateKey'),
     state: () => ipcRenderer.invoke('server:state'),
+  },
+  attachments: {
+    pick: () => ipcRenderer.invoke('attachments:pick'),
+    read: (paths) => ipcRenderer.invoke('attachments:read', paths),
+    // Drag&Drop liefert File-Objekte ohne Pfad (Electron 32+) — der Pfad kommt
+    // ausschließlich über webUtils, nicht aus file.path.
+    pathForFile: (file) => {
+      try { return webUtils.getPathForFile(file); } catch { return ''; }
+    },
+  },
+  bench: {
+    list: () => ipcRenderer.invoke('bench:list'),
+    add: (entry) => ipcRenderer.invoke('bench:add', entry),
+    remove: (id) => ipcRenderer.invoke('bench:remove', id),
+    clear: () => ipcRenderer.invoke('bench:clear'),
   },
   dialog: {
     pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),

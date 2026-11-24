@@ -2,6 +2,37 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [2.0.0] - 2026-11-24
+
+### Added
+
+- **Headless CLI (`model-harbor`).** `model-harbor start` opens a number menu for models,
+  backends, the API server, HuggingFace search, backend downloads, benchmarks, settings and
+  logs; every entry also exists as a scriptable subcommand with `--json`. The CLI shares
+  `settings.json` and the data folders with the desktop app, so both sides see the same state.
+- **Web mode (`model-harbor serve`).** Serves the unchanged interface in a browser by building
+  `window.api` over HTTP + SSE instead of Electron IPC. Bound to `127.0.0.1` by default; `--lan`
+  requires an API token, and a taken port falls back to the next free one.
+- **Benchmark tab.** Tokens/s, prefill and TTFT of the loaded model are measured and kept in
+  `benchmarks.json` (50 entries), so runs can be compared over time.
+- **Chat attachments.** Files are read in the main process before the message is sent.
+
+### Fixed
+
+- **The backend in the sidebar footer was the wrong one.** It showed the first *installed*
+  backend instead of the active one. The footer now shows what is actually in use: the backend of
+  a running server, otherwise the choice from the Server tab, otherwise the hardware
+  recommendation — plus a line saying which of those it is, and `not installed yet` when that
+  build is missing.
+- **End of input ended the dialog with an error.** With piped stdin or Ctrl-D the menu printed
+  `Fehler: readline was closed` and a stack trace. EOF now aborts cleanly with `Beendet.` and
+  exit code 0.
+- **The web transport was missing event channels.** `update:available` and `update:progress` were
+  rejected as an illegal channel, so the interface could not subscribe to the same channels over
+  HTTP as over IPC.
+- **The server card lost its backend when the interface was reloaded** — the state now carries the
+  backend from the moment the server starts.
+
 ## [1.8.3] - 2026-11-24
 
 ### Added
