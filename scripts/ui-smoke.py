@@ -807,6 +807,76 @@ with sync_playwright() as p:
     check("Chat: Fokus kehrt nach dem Stream-Ende ins Textfeld zurueck",
           back_focus["active"] == "input", json.dumps(back_focus))
 
+    # Backend-Badge je Modell: Engine (llama.cpp / ONNX Runtime) + das tatsaechlich
+    # gewaehlte Backend — auch wenn mehrere installiert sind (ONNX und Vulkan gleichzeitig).
+    BADGE_JS = """
+    () => {
+      const row = document.querySelector('#local-list .row');
+      if (!row) return null;
+      const b = row.querySelector('.row-title .badge-backend, .row-title .badge-onnx, .row-title .badge-big');
+      return b ? { cls: b.className, text: b.textContent.trim(), title: b.getAttribute('title') || '' } : null;
+    }
+    """
+    GGUF = {"id": "m1", "repo": "test/model", "file": "model.Q4_K_M.gguf", "sizeLabel": "4.2 GB",
+            "path": "/tmp/models/model.Q4_K_M.gguf", "quant": "Q4_K_M",
+            "fit": {"verdict": "gpu", "label": "GPU", "detail": "Passt zur GPU", "gpuLayers": 32}}
+    ONNX_M = {"id": "m2", "repo": "onnx/model", "file": "model.onnx", "sizeLabel": "1.1 GB",
+              "path": "/tmp/models/onnx", "isOnnx": True}
+    CUDA = {"id": "linux-cuda-12.8", "label": "NVIDIA CUDA 12.8"}
+    VULKAN = {"id": "linux-vulkan", "label": "Vulkan (NVIDIA/AMD/Intel)"}
+    ONNX_B = {"id": "onnx", "label": "ONNX Runtime (NPU)"}
+
+    def render_with(models, installed, primary, srv_backend=None):
+        page.evaluate(
+            """([models, installed, primary, srvBackend]) => {
+                state.backends = { available: [], installed, release: { tag: 'b1' } };
+                state.hw = { recommendation: { primary, candidates: [] } };
+                state.local = models;
+                if (srvBackend) state.server = { running: true, starting: false, port: 9931,
+                  model: models[0].path, preset: 'balanced', backend: srvBackend, apiKey: '', host: '127.0.0.1', lan: false };
+                renderLocal(); renderServer();
+            }""",
+            [models, installed, primary, srv_backend])
+        page.wait_for_timeout(120)
+        return page.evaluate(BADGE_JS)
+
+    page.evaluate("setView('models'); setTab('local')")
+    b = render_with([GGUF], [CUDA, VULKAN], "linux-vulkan")
+    check("Badge: GGUF + mehrere Backends -> Empfehlung (llama.cpp · Vulkan)",
+          b and b["text"] == "llama.cpp · Vulkan" and "badge-backend" in b["cls"] and "Vulkan" in b["title"],
+          json.dumps(b, ensure_ascii=False))
+
+    b = render_with([GGUF], [ONNX_B], "linux-vulkan")
+    check("Badge: GGUF ohne llama.cpp-Backend -> 'Backend fehlt' (Warnfarbe)",
+          b and "Backend fehlt" in b["text"] and "badge-big" in b["cls"],
+          json.dumps(b, ensure_ascii=False))
+
+    b = render_with([ONNX_M], [ONNX_B, VULKAN], "linux-vulkan")
+    check("Badge: ONNX-Modell -> ONNX Runtime (nicht llama.cpp), trotz installiertem Vulkan",
+          b and b["text"] == "ONNX Runtime" and "badge-onnx" in b["cls"],
+          json.dumps(b, ensure_ascii=False))
+
+    b = render_with([ONNX_M], [VULKAN], "linux-vulkan")
+    check("Badge: ONNX-Modell ohne ONNX-Backend -> 'Backend fehlt'",
+          b and "Backend fehlt" in b["text"] and "badge-big" in b["cls"],
+          json.dumps(b, ensure_ascii=False))
+
+    # Server-Auswahl nennt das Backend pro Modell, die Server-Karte das laufende.
+    b = render_with([GGUF], [CUDA, VULKAN], "linux-vulkan", srv_backend="linux-vulkan")
+    srv = page.evaluate(
+        """() => {
+            const opts = [...document.querySelectorAll('#srv-model option')].map(o => o.textContent.trim());
+            const hint = [...document.querySelectorAll('#server-body .srv-hint')]
+              .map(e => e.textContent.trim()).filter(t => /Backend/.test(t));
+            const badge = document.querySelector('#server-body .srv-hint .badge-backend, #server-body .srv-hint .badge-onnx');
+            return { opts, hint, badge: badge ? badge.textContent.trim() : null };
+        }""")
+    check("Server-Auswahl: Backend steht in jeder Modell-Option",
+          any("llama.cpp · Vulkan" in o for o in srv["opts"]) and srv["opts"], json.dumps(srv, ensure_ascii=False))
+    check("Server-Karte: laufendes Backend wird angezeigt",
+          srv["badge"] == "llama.cpp · Vulkan" and any("Backend" in h for h in srv["hint"]),
+          json.dumps(srv, ensure_ascii=False))
+
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))
 

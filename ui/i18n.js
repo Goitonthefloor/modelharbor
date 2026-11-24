@@ -113,6 +113,24 @@
     'models.load': { de: 'Laden', en: 'Load' },
     'models.revealTitle': { de: 'Im Ordner zeigen', en: 'Show in folder' },
     'models.externalBadge': { de: 'Extern', en: 'External' },
+
+    /* Backend je Modell: welche Engine startet (llama.cpp vs. ONNX Runtime) */
+    'backend.onnx': { de: 'ONNX Runtime', en: 'ONNX Runtime' },
+    'backend.llama': { de: 'llama.cpp', en: 'llama.cpp' },
+    'backend.missing': { de: 'Backend fehlt', en: 'backend missing' },
+    'backend.titleLlama': {
+      de: 'llama.cpp mit dem Backend „{backend}". GGUF-Modelle laufen immer über llama.cpp — welcher Build startet, entscheiden die installierten Backends und die Hardware-Empfehlung.',
+      en: 'llama.cpp with the "{backend}" backend. GGUF models always run through llama.cpp — which build starts is decided by the installed backends and the hardware recommendation.',
+    },
+    'backend.titleOnnx': {
+      de: 'ONNX Runtime (GenAI). ONNX-Modelle laufen nicht über llama.cpp, sie brauchen das ONNX-Backend.',
+      en: 'ONNX Runtime (GenAI). ONNX models do not run through llama.cpp — they need the ONNX backend.',
+    },
+    'backend.titleMissing': {
+      de: 'Für dieses Modell ist kein passendes Backend installiert. Installiere es in der Einrichtung.',
+      en: 'No matching backend is installed for this model. Install it in Setup.',
+    },
+    'server.backend': { de: 'Backend', en: 'Backend' },
     'models.externalTitle': {
       de: 'Aus einem zusätzlichen Ordner — laden ja, löschen nein',
       en: 'From an additional folder — load yes, delete no',

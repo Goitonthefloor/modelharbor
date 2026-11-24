@@ -245,6 +245,12 @@ function handle(channel, fn) {
   });
 }
 
+/** ONNX-/OGA-Modellordner: Verzeichnis mit genai_config.json (wie server.js). */
+function isOnnxModelDir(dir) {
+  try { return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'genai_config.json')); }
+  catch { return false; }
+}
+
 function registerIpc() {
   handle('app:info', () => ({
     version: app.getVersion(),
@@ -439,9 +445,6 @@ function registerIpc() {
 
   handle('server:start', async (_e, opts) => {
     const installed = await backends.listInstalled(settings.backendsDir);
-    const wanted = opts.backendId || (hwCache && hwCache.recommendation ? hwCache.recommendation.primary : null);
-    let backend = installed.find((b) => b.id === wanted) || installed[0];
-    if (!backend) throw new Error(i18n.t('error.noBackend'));
     // Modellpfad muss aus einem eingerichteten Modellordner stammen (Haupt- oder
     // Zusatzordner) — der Renderer liefert den Pfad, also wird er hier geprüft.
     let modelPath;
@@ -450,6 +453,13 @@ function registerIpc() {
     } catch {
       throw new Error(i18n.t('error.modelPathOutside'));
     }
+    // ONNX-Ordner (genai_config.json) brauchen das ONNX-Backend, GGUF-Modelle dürfen
+    // es nie bekommen (llama.cpp kann keinen ONNX-Ordner laden). Die Wahl passiert in
+    // backends.pickForModel, damit die Badges in der Oberfläche dasselbe sagen.
+    const isOnnx = !!(opts.isOnnx || isOnnxModelDir(modelPath));
+    const primary = opts.backendId || (hwCache && hwCache.recommendation ? hwCache.recommendation.primary : null);
+    const backend = backends.pickForModel(installed, { primary, isOnnx });
+    if (!backend) throw new Error(i18n.t(isOnnx ? 'error.onnxBackendMissing' : 'error.noBackend'));
     // ctx/gpuLayers aus dem Renderer sind die globalen Werte (bzw. die
     // Fit-Empfehlung) — sie bilden die BASIS. Modellspezifische Einstellungen
     // haben Vorrang, explizite Overrides im Aufruf nochmal darüber.

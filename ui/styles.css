@@ -334,6 +334,8 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 .badge-neutral { color: var(--text-dim); background: rgba(255,255,255,.04); border-color: var(--border); }
 .badge-custom { color: var(--accent-ink); background: rgba(45,212,191,.1); border-color: rgba(45,212,191,.3); }
 .badge-exp { color: #c4b5fd; background: rgba(167,139,250,.1); border-color: rgba(167,139,250,.25); }
+.badge-backend { color: #7dd3fc; background: rgba(56,189,248,.1); border-color: rgba(56,189,248,.25); }
+.badge-onnx { color: #c4b5fd; background: rgba(167,139,250,.14); border-color: rgba(167,139,250,.35); }
 .badge-tag { color: var(--muted); background: rgba(255,255,255,.03); border-color: var(--border-soft); }
 
 .fit-note { font-size: 11.8px; color: var(--muted); line-height: 1.45; }

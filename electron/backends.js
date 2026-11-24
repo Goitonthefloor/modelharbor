@@ -15,6 +15,7 @@ const zlib = require('zlib');
 const yauzl = require('yauzl');
 const tar = require('tar');
 const i18n = require('../ui/i18n');
+const modelBackend = require('../ui/model-backend');
 const { verifyDownload } = require('./integrity');
 
 const RELEASES_API = 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=25';
@@ -805,6 +806,7 @@ module.exports = {
   installBackend,
   listInstalled,
   removeBackend,
+  pickForModel: modelBackend.pick,
   getJson,
   downloadToFile,
   extractZipSafe,

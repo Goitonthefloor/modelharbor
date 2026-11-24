@@ -293,6 +293,42 @@ function fitBadge(fit) {
   return `<span class="badge ${cls}" title="${esc(fitDetail(fit))}">${esc(fitLabel(fit))}</span>`;
 }
 
+/* ------------------------- Backend je Modell ------------------------- */
+
+/** Backend, das für dieses Modell startet — gleiche Regel wie im Main (ui/model-backend.js). */
+function backendDesc(m) {
+  const installed = (state.backends && state.backends.installed) || [];
+  const primary = state.hw && state.hw.recommendation ? state.hw.recommendation.primary : null;
+  return window.MODELBACKEND.describe(installed, { primary, isOnnx: !!(m && m.isOnnx) });
+}
+
+/** Anzeigetext "Engine · Backend", z. B. `llama.cpp · Vulkan` oder `ONNX Runtime`. */
+function backendText(desc) {
+  const engine = desc.kind === 'onnx' ? t('backend.onnx') : t('backend.llama');
+  if (desc.missing) return `${engine} · ${t('backend.missing')}`;
+  return desc.kind === 'llama' && desc.backendShort ? `${engine} · ${desc.backendShort}` : engine;
+}
+
+/** Badge: Engine + Backend-Kurzname, bei fehlendem Backend in Warnfarbe. */
+function backendBadgeHtml(desc) {
+  const cls = desc.missing ? 'badge-big' : (desc.kind === 'onnx' ? 'badge-onnx' : 'badge-backend');
+  const key = desc.missing ? 'backend.titleMissing' : (desc.kind === 'onnx' ? 'backend.titleOnnx' : 'backend.titleLlama');
+  const vars = { backend: desc.backendLabel || '', engine: desc.kind === 'onnx' ? t('backend.onnx') : t('backend.llama') };
+  return `<span class="badge ${cls}" title="${esc(t(key, vars))}">${esc(backendText(desc))}</span>`;
+}
+
+/** Badge für das laufende Backend (ID aus server:start). */
+function runningBackendBadge(backendId) {
+  const installed = (state.backends && state.backends.installed) || [];
+  const manifest = installed.find((b) => b.id === backendId);
+  const isOnnx = backendId === 'onnx';
+  const short = manifest ? window.MODELBACKEND.shortName(manifest.id, manifest.label) : '';
+  const text = isOnnx ? t('backend.onnx') : `${t('backend.llama')}${short ? ' · ' + short : ''}`;
+  const key = isOnnx ? 'backend.titleOnnx' : 'backend.titleLlama';
+  const vars = { backend: manifest ? manifest.label : String(backendId || ''), engine: t('backend.llama') };
+  return `<span class="badge ${isOnnx ? 'badge-onnx' : 'badge-backend'}" title="${esc(t(key, vars))}">${esc(text)}</span>`;
+}
+
 // Übersetzte Fit-Texte: Deutsch kommt aus dem Main-Prozess, Englisch wird aus den Messwerten gebaut
 const FIT_KEYS = { gpu: 'gpu', hybrid: 'hybrid', ram: 'ram', 'too-big': 'tooBig' };
 
@@ -774,6 +810,7 @@ async function loadModel(model, { presetOverride, stay } = {}) {
     });
     state.server = {
       running: true, starting: false, port: res.port, model: model.path, preset: res.preset,
+      backend: res.backend || null,
       unloading: false,
       apiKey: res.apiKey || '', host: res.host || '127.0.0.1', lan: !!res.lan,
       lastModel: { path: model.path, id: model.id || null, fit: model.fit || null },
@@ -989,7 +1026,7 @@ function renderLocal() {
   list.innerHTML = state.local.map((m) => `
     <div class="row">
       <div class="row-main">
-        <div class="row-title">${esc(m.repo)}${m.external ? ` <span class="badge badge-neutral" title="${esc(t('models.externalTitle'))}">${esc(t('models.externalBadge'))}</span>` : ''}${m.settingsSummary ? ` <span class="badge badge-custom" title="${esc(t('ms.badgeTitle', { summary: m.settingsSummary }))}">${esc(t('ms.custom'))}</span>` : ''}</div>
+        <div class="row-title">${esc(m.repo)} ${backendBadgeHtml(backendDesc(m))}${m.external ? ` <span class="badge badge-neutral" title="${esc(t('models.externalTitle'))}">${esc(t('models.externalBadge'))}</span>` : ''}${m.settingsSummary ? ` <span class="badge badge-custom" title="${esc(t('ms.badgeTitle', { summary: m.settingsSummary }))}">${esc(t('ms.custom'))}</span>` : ''}</div>
         <div class="row-sub">${esc(m.file)} · ${esc(m.sizeLabel)}${m.quant ? ' · ' + esc(m.quant) : ''}${m.settingsSummary ? ' · ' + esc(m.settingsSummary) : ''}${m.external && m.sourceDir ? ' · ' + esc(t('models.fromFolder', { dir: m.sourceDir })) : ''}</div>
         <div class="fit-note" style="margin-top:4px">${esc(fitDetail(m.fit))}</div>
       </div>
@@ -1330,7 +1367,7 @@ function renderServer() {
     state.serverModelId = (loaded && loaded.id) || (models[0] && models[0].id) || '';
   }
   const presetId = state.serverPreset || state.settings?.lastPreset || 'balanced';
-  const modelOptions = models.map((m) => `<option value="${esc(m.id)}"${m.id === state.serverModelId ? ' selected' : ''}>${esc(m.repo)} · ${esc(m.file)}${m.external ? ` (${esc(t('models.externalBadge'))})` : ''}</option>`).join('');
+  const modelOptions = models.map((m) => `<option value="${esc(m.id)}"${m.id === state.serverModelId ? ' selected' : ''}>${esc(m.repo)} · ${esc(m.file)} · ${esc(backendText(backendDesc(m)))}${m.external ? ` (${esc(t('models.externalBadge'))})` : ''}</option>`).join('');
   const presetOptions = (state.presets || []).map((p) => `<option value="${esc(p.id)}"${p.id === presetId ? ' selected' : ''}>${esc(p.name || p.id)}</option>`).join('');
 
   body.innerHTML = `
@@ -1345,6 +1382,7 @@ function renderServer() {
         <button class="btn btn-primary" id="srv-start" data-act="srv-start">${esc(t('server.start'))}</button>
         <button class="btn btn-danger-ghost" id="srv-stop" data-act="srv-stop">${esc(t('server.stop'))}</button>
       </div>` : `<p class="srv-note">${esc(t('server.noModels'))}</p>`}
+      ${state.server.running && state.server.backend ? `<p class="srv-hint">${esc(t('server.backend'))}: ${runningBackendBadge(state.server.backend)}</p>` : ''}
       <p class="srv-hint">${esc(t('server.chatUsesSame'))}</p>
     </div>
 
@@ -1825,7 +1863,7 @@ function bindEvents() {
         toast(t('toast.backendInstalled', { id }), 'ok');
         state.backends = await bridge.backends.list();
         state.backendInstalls.delete(id);
-        renderSetup(); renderSidebar();
+        renderSetup(); renderSidebar(); renderLocal();
       } catch (err) {
         state.backendInstalls.delete(id);
         renderSetup();
@@ -1844,7 +1882,7 @@ function bindEvents() {
       try {
         await bridge.backends.remove(id);
         state.backends = await bridge.backends.list();
-        renderSetup(); renderSidebar();
+        renderSetup(); renderSidebar(); renderLocal();
       } catch (err) { toast(err.message, 'error'); }
     }
     if (act === 'pick-models') {

@@ -2,6 +2,26 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.8.3] - 2026-11-24
+
+### Added
+
+- **Every model now shows the backend it will run on.** Local model rows, the model picker in the
+  Server tab and the running server card carry a badge with engine and build — `llama.cpp · Vulkan`,
+  `llama.cpp · CUDA 12.8` or `ONNX Runtime`. A model without a matching backend is marked
+  `backend missing` in warning colour instead of failing at load time.
+- `ui/model-backend.js` is the single source for that decision: `server:start` picks the backend with
+  the same function the interface renders from, so the badge cannot drift away from what actually
+  starts. ONNX model folders (`genai_config.json`) always resolve to the ONNX backend — llama.cpp
+  cannot load them — and GGUF models never do.
+
+### Fixed
+
+- **Backend selection ignored the model type.** `server:start` used the recommended backend, or the
+  first installed one, so with both ONNX and Vulkan installed an ONNX model could be handed to
+  llama.cpp and vice versa. Missing backends now fail with `error.onnxBackendMissing` /
+  `error.noBackend` instead of a generic start failure.
+
 ## [1.8.2] - 2026-11-24
 
 ### Fixed
