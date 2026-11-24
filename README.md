@@ -218,6 +218,13 @@ applies the main parameters again with every request, so a preset change takes e
 - **llama.cpp**: binaries from the official `ggml-org/llama.cpp` releases. The app automatically
   takes the newest build that ships binary assets.
 - **llama-server** runs as a local process and exposes an OpenAI-compatible API on `127.0.0.1`.
+- **Backend per model**: GGUF models always run through `llama-server`, ONNX model folders
+  (`genai_config.json`) always through the ONNX Runtime server — llama.cpp cannot load them. Which
+  llama.cpp build starts is decided in one place (`ui/model-backend.js`): the hardware
+  recommendation if that backend is installed, otherwise the first installed one. The same module
+  renders the badge in the model list, in the Server tab's model picker and on the running server
+  card (`llama.cpp · Vulkan`, `ONNX Runtime`), so the badge shows the build that actually starts.
+  A model without a matching backend is marked `backend missing` before you try to load it.
 - The chat streams via SSE directly from the renderer.
 - **Updates** come from the GitHub releases (`Goitonthefloor/modelharbor`): semver comparison in
   the main process, download of the platform-matching package with progress status. The check is
