@@ -118,7 +118,7 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 .main { position: relative; overflow: hidden; }
 .view { position: absolute; inset: 0; display: none; flex-direction: column; overflow: hidden; }
 .view.is-active { display: flex; }
-.view#view-models, .view#view-setup { overflow-y: auto; }
+.view#view-models, .view#view-server, .view#view-setup { overflow-y: auto; }
 
 /* ---------- Buttons ---------- */
 .btn {

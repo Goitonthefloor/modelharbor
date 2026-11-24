@@ -810,6 +810,37 @@ with sync_playwright() as p:
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))
 
+    # Regression: jede Seite muss bei kleinem Fenster scrollbar sein (Server-Seite war
+    # jahrelang overflow:hidden -> Inhalt unten unerreichbar, Audit-/Nutzermeldung).
+    page.set_viewport_size({"width": 1024, "height": 480})
+    page.wait_for_timeout(200)
+    SCROLL_JS = """
+    () => {
+      const v = document.querySelector('.view.is-active');
+      const cs = getComputedStyle(v);
+      const inner = [...v.querySelectorAll('*')].find(e => {
+        const s = getComputedStyle(e);
+        return /auto|scroll/.test(s.overflowY) && e.scrollHeight > e.clientHeight + 2;
+      });
+      return { id: v.id, client: v.clientHeight, scroll: v.scrollHeight,
+               overflowY: cs.overflowY, top: Math.round(v.scrollTop),
+               inner: !!inner };
+    }
+    """
+    for view in ("chat", "models", "server", "setup"):
+        page.click(f'.nav-item[data-view="{view}"]')
+        page.wait_for_timeout(350)
+        page.evaluate("() => { document.querySelector('.view.is-active').scrollTop = 0; }")
+        m = page.evaluate(SCROLL_JS)
+        page.mouse.move(512, 300)
+        page.mouse.wheel(0, 600)
+        page.wait_for_timeout(250)
+        after = page.evaluate(SCROLL_JS)
+        needs = m["scroll"] - m["client"]
+        check(f"Layout: Seite '{view}' scrollt bei 1024x480 (Ueberlauf {needs}px)",
+              needs <= 2 or after["top"] > m["top"] or after["inner"],
+              json.dumps({"vorher": m, "nachher": after}))
+
     browser.close()
 
 fails = [r for r in results if not r[1]]
