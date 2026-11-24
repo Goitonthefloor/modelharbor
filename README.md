@@ -47,9 +47,13 @@ right way.
   You get the base URL (`http://127.0.0.1:1234/v1`), the stable model name **`ModelHarbor`**
   (it stays the same when you switch models), the endpoints, and copyable **curl**, **Python
   (openai SDK)** and **JSON** examples. A **LAN switch** binds the server to `0.0.0.0` and shows
-  the real LAN addresses, so other machines in your network can use it. An **API key** can be
-  generated with one click and is then enforced on every `/v1/*` call (`/health` stays open for
-  monitoring); turning the LAN switch on without a key shows a visible warning. **CORS** can be
+  the real LAN addresses, so other machines in your network can use it. An **API key is always
+  required**: on first start the app generates one (`mh-…`) and stores it, so it survives restarts
+  and stays valid for agents you already configured. Every `/v1/*` call is checked against it —
+  for llama.cpp and ONNX models alike — and a request without or with a wrong key gets a 401
+  (`/health` stays open for monitoring). The key field in the tab is always filled; **Regenerate key**
+  creates a new one, and the server refuses to start without a key, so the old "no key on the LAN"
+  state cannot come back. **CORS** can be
   restricted to same-origin, and **parallel requests** sets how many agents are served at once
   (note that llama.cpp splits the context window across those slots). The built-in chat uses the
   same server and sends the key automatically, and the server log is shown live in the tab.
@@ -95,12 +99,12 @@ The ready-made packages live in `dist/`:
 
 | Platform | File | Status |
 |---|---|---|
-| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.7.4.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
-| Linux (x64) | `dist/ModelHarbor-1.7.4.AppImage` | built, start-tested (126 MB) |
-| macOS (Apple Silicon / Intel) | `ModelHarbor-1.2.2-arm64.dmg` / `-x64.dmg` | build with `npm run dist:mac` (on a Mac) |
+| Windows 10/11 (x64) | `dist/ModelHarbor Setup 1.8.2.exe` | built with `npm run dist:win` (Wine cross-build, unsigned) |
+| Linux (x64) | `dist/ModelHarbor-1.8.2.AppImage` | built, start-tested (126 MB) |
+| macOS (Apple Silicon / Intel) | `ModelHarbor-<version>-arm64.dmg` / `-x64.dmg` | build with `npm run dist:mac` (on a Mac) |
 
 Both current packages are attached to the [GitHub release](https://github.com/Goitonthefloor/modelharbor/releases/latest)
-as `ModelHarbor-1.7.4.AppImage` and `ModelHarbor-Setup-1.7.4.exe`.
+as `ModelHarbor-1.8.2.AppImage` and `ModelHarbor-Setup-1.8.2.exe`.
 
 On first start the app walks you through the setup: check hardware, install a backend,
 pick a model.
@@ -165,16 +169,36 @@ The backend recommendation follows this logic:
 
 ## How the model fit is calculated
 
-I estimate the memory requirement like this:
+The parameter count is derived from the file size and the quant of the file name; the memory
+requirement is then estimated like this:
 
 ```
-need ≈ file size + KV cache + overhead
-KV cache ≈ parameters × 0.045 GB × (context / 4096)
+need ≈ file size + KV cache + overhead (0.6 GB, fixed)
+
+KV cache (f16) ≈ parameters × 0.045 GB × (context / 4096)
+KV cache       ≈ KV cache (f16) × KV factor
+KV factor      = (bytes per K value + bytes per V value) / (2 × 2 bytes)
+
+  f16/f16 → 1.00    q8_0/q8_0 → 0.53    q4_1/q4_1 → 0.31    q4_0/q4_0 → 0.28
 ```
 
-That yields four levels: **fits in VRAM**, **partly on GPU**, **runs in RAM** and **too large**.
-For the quantization the app takes the largest quant that still fits with a safety margin. It
-stays below 65 % of the budget so that speed does not suffer.
+The KV factor follows the per-model cache types (K and V are weighted separately, the byte
+counts include the GGML block overhead: `f32` 4, `f16`/`bf16` 2, `q8_0` 1.06, `q4_0` 0.56
+bytes per value). So a model with a `q4_0` K and V cache needs roughly 28 % of the f16 cache
+for the same context — which is why a long context can suddenly fit once the cache is quantized.
+
+That yields four levels:
+
+| Level | Condition |
+|---|---|
+| fits in VRAM | need ≤ 90 % of the VRAM of the strongest GPU |
+| partly on GPU | need ≤ 190 % of the VRAM and ≤ 80 % of the RAM |
+| runs in RAM | need ≤ 75 % of the RAM |
+| too large | anything above that |
+
+For the quantization the app takes the largest quant that still fits: preferred are quants up to
+65 % of the budget, so that speed does not suffer; above that the hard limit is 88 %. `F32`,
+`F16` and `BF16` are only chosen when nothing else fits.
 
 ## Presets in detail
 
