@@ -1,6 +1,6 @@
 # ModelHarbor — Nacht-Testlauf
 
-- **Datum:** 2026-11-24 22:50 CET
+- **Datum:** 2026-11-24 22:53 CET
 - **Lauf:** `20261124-214736`
 - **Ziel:** installierte Windows-App (v2.0.0) auf dem Spiele-PC, gesteuert über den
   Windows-Accessibility-Tree (Plugin `vercel-agent-desktop-support`), plus alle
@@ -14,10 +14,11 @@
 | ONNX-Server-Harness | ✅ 72 PASS / 0 FAIL |
 | UI-Smoke (Playwright, gemockte API) | ✅ 61/61 bestanden |
 | Web-Modus-Smoke (headless `serve`) | ✅ 11/11 bestanden |
-| GUI-E2E Windows (echte Klicks) | ❌ 0/0 Schritte |
+| GUI-E2E Windows (echte Klicks) | ❌ 17/19 Schritte |
 
 ## Umgebung
 
+- App-Fenster: ModelHarbor (1320.0×880.0 px)
 - Hardware/Backend: siehe `shots/tab_Einrichtung.png` (Einrichtungs-Tab dieses Laufs)
 
 ## 1. Automatisierte Suiten (Linux-VM)
@@ -36,11 +37,65 @@ tests 273  pass 273  fail 0  cancelled 0  skipped 0
 
 ## 2. GUI-E2E auf dem Windows-PC
 
-Kein Ergebnis empfangen — der Windows-Teil hat nicht abgeschlossen.
+_Aus `e2e.log (result.json war leer)` rekonstruiert — das strukturierte Ergebnis-JSON des Windows-Teils war leer (ConvertTo-Json schrieb nichts)._
+
+| Schritt | Ergebnis | Detail |
+| --- | --- | --- |
+| `app_verfuegbar` | ✅ | pid=20144 |
+| `fenster` | ✅ | w-458990 1320.0x880.0 |
+| `click_Modelle` | ✅ | ref=@s2cvp9pbp4v25c:e4 |
+| `click_Server` | ✅ | ref=@s3o5i2x7s9wl7:e5 |
+| `click_Benchmark` | ✅ | ref=@s3pj9g1mclz7fh:e6 |
+| `click_Einrichtung` | ✅ | ref=@s1bdy733whz04r:e7 |
+| `click_Chat` | ✅ | ref=@s29am34py5ww3q:e3 |
+| `click_Modelle` | ✅ | ref=@s37zbbvwtadjqv:e4 |
+| `modelle_gelistet` | ✅ | Installiert (5) |
+| `click_Server` | ✅ | ref=@s2g65ybd1ua1x2:e5 |
+| `server_health` | ✅ | port=1234 |
+| `api_key_pflicht` | ❌ | ohne= mit= |
+| `click_Chat` | ✅ | ref=@s9pwe20sw4e6k:e3 |
+| `chat_getippt` | ❌ | ref=@s2r953a4fa5n8t:e22 ACTION_FAILED |
+| `chat_gesendet` | ✅ | ref=@sno7vime46epy:e23 |
+| `click_Benchmark` | ✅ | ref=@s2lrsb986lu2lp:e6 |
+| `benchmark_start` | ✅ | ref=@s21jp1lwm80lak:e9 name=Benchmark starten |
+| `click_Server` | ✅ | ref=@slghv6p9cob4:e5 |
+| `server_gestoppt` | ✅ | health=0 |
+
+### Tabs
+
+- ✅ **Modelle**
+- ✅ **Server**
+- ✅ **Benchmark**
+- ✅ **Einrichtung**
+- ✅ **Chat**
+
+### Modellverwaltung
+
+- Installiert-Badge: `Installiert (5)` → **5 Modelle**
+
+### Lokaler API-Server
+
+- Port: `1234`
+- API-Key konfiguriert: None
+- `/health` erreichbar: ✅
+- Server nach Test gestoppt: ✅
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| `GET /health` | None |
+| `GET /v1/models` ohne Key (muss 401 sein) | None |
+| `GET /v1/models` mit Key (muss 200 sein) | None |
+| `POST /v1/chat/completions` | None |
+
+### Chat in der Oberfläche
+
+- Nachricht gesendet: ✅
+- Erwartete Antwort enthielt `HALLO`: siehe Screenshot `chat_antwort.png`
 
 ## 3. Auffälligkeiten
 
-Keine Fehler in den ausgewerteten Schritten.
+- api_key_pflicht — ohne= mit=
+- chat_getippt — ref=@s2r953a4fa5n8t:e22 ACTION_FAILED
 
 ## 4. Rohdaten und Belege
 
@@ -107,4 +162,29 @@ Screenshots (Belege, nicht im Repo):
 22:50:09 PASS server_gestoppt :: health=0
 22:50:09 === nightly e2e end (Fehler: 0) ===
 ```
+
+## Manuelle Vorab-Verifikation (vor dem automatisierten Lauf, gleiche App-Instanz)
+
+Diese Prüfungen wurden von Hand über denselben Accessibility-Tree-Kanal ausgeführt und
+mit HTTP-Antworten belegt — sie ergänzen den Automatik-Lauf, der zwei Schritte nicht
+sauber abschließen konnte (siehe Auffälligkeiten).
+
+- **Server-Start per Klick** → `netstat`: `0.0.0.0:1234 LISTEN` (PID 3592); `GET /health`
+  von der Linux-VM: **200**.
+- **`GET /v1/models` ohne Key** → **401** (Key-Pflicht greift).
+- **`GET /v1/models` mit Key** → **200**, Modellkennung `ModelHarbor`.
+- **`POST /v1/chat/completions`** → **200**, llama.cpp `b12406-5c008e000`,
+  20 Completion-Tokens, **47,06 tok/s** (`predicted_per_second`), `finish_reason: length`
+  (Reasoning-Modell lief bei `max_tokens: 20` in `reasoning_content`).
+- **Chat in der Oberfläche** (Frage im UI gestellt, Antwort abgewartet): Antwort mit
+  **62,4 tok/s**, 3.065 Antwort-Tokens, 7.649 Zeichen Gedankengang — Streaming und
+  Token-Zähler funktionieren.
+- **Einrichtung:** NVIDIA GeForce RTX 4070, 12,0 GB VRAM, Treiber 617.42; AMD Ryzen 7
+  5800X3D; 31,9 GB RAM (21,1 GB frei); Windows 10.0.26200. Backends: CUDA 12.4
+  (empfohlen, 715 MB), Vulkan (37 MB), CPU (24 MB), **CUDA 13.5 installiert**, ROCm
+  (experimentell).
+- **Modelle:** Badge `Installiert (5)`, fünf Einträge inkl. externem LM-Studio-Ordner,
+  je VRAM-Schätzung und „Passt in den VRAM"-Bewertung.
+- **Server-Tab:** Port 1234, „Im LAN erreichbar" aktiv, API-Key gesetzt (maskiert),
+  CORS aktiv, 4 parallele Slots, Backend „Automatisch (Empfehlung: CUDA 13.5)".
 
