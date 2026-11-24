@@ -69,6 +69,9 @@ window.api = {
 """
 
 results = []
+
+FOCUS_JS = "() => { window.fetch = async () => { await new Promise(r => setTimeout(r, 400)); const e = new TextEncoder(); const b = new ReadableStream({ start(c) { c.enqueue(e.encode('data: ' + JSON.stringify({choices:[{delta:{content:'Hi'}}]}) + '\\n\\n')); c.close(); } }); return new Response(b, {status: 200}); }; document.querySelectorAll('dialog[open]').forEach(d => d.close()); setView('chat'); state.server = { running: true, starting: false, port: 9931, model: '/tmp/models/m.gguf', preset: 'balanced', apiKey: '', host: '127.0.0.1', lan: false }; state.chat.messages = []; state.chat.streaming = false; renderChatState(); return true; }"
+
 def check(name, ok, detail=""):
     results.append((name, ok, detail))
     print(("PASS" if ok else "FAIL"), name, ("- " + detail if detail else ""))
@@ -774,6 +777,35 @@ with sync_playwright() as p:
           focus["before"] and focus["duringDisabled"] is False and focus["duringFocus"]
           and focus["afterDisabled"] is False and focus["afterFocus"],
           json.dumps(focus))
+
+    page.evaluate(FOCUS_JS)
+    page.fill("#input", "Hallo")
+    page.click("#btn-send")
+    page.wait_for_timeout(1500)
+    click_focus = page.evaluate("() => ({ active: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : 'none', msgs: state.chat.messages.length, streaming: state.chat.streaming })")
+    check("Chat: Fokus bleibt nach Klick auf Senden im Textfeld",
+          click_focus["active"] == "input", json.dumps(click_focus))
+
+    page.evaluate(FOCUS_JS)
+    page.fill("#input", "Hallo3")
+    page.focus("#input")
+    page.evaluate("() => { const h = window.__handlers && window.__handlers['server:state']; if (h) h({ running: false }); }")
+    page.wait_for_timeout(200)
+    st_false = page.evaluate("() => ({ active: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : 'none', disabled: document.querySelector('#input').disabled })")
+    page.evaluate("() => { const h = window.__handlers && window.__handlers['server:state']; if (h) h({ running: true, port: 9931, model: '/tmp/models/m.gguf', preset: 'balanced' }); }")
+    page.wait_for_timeout(200)
+    st_back = page.evaluate("() => ({ active: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : 'none', disabled: document.querySelector('#input').disabled })")
+    print("STATEFALSE", json.dumps(st_false), "STATBACK", json.dumps(st_back))
+
+    page.evaluate(FOCUS_JS)
+    page.fill("#input", "Hallo4")
+    page.click("#btn-send")
+    page.evaluate("() => document.querySelector('#btn-send').focus()")
+    page.wait_for_function("() => !state.chat.streaming", timeout=10000)
+    page.wait_for_timeout(300)
+    back_focus = page.evaluate("() => ({ active: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : 'none' })")
+    check("Chat: Fokus kehrt nach dem Stream-Ende ins Textfeld zurueck",
+          back_focus["active"] == "input", json.dumps(back_focus))
 
     relevant = [e for e in errors if "favicon" not in e and "Preload" not in e]
     check("Keine Renderer-Fehler", len(relevant) == 0, "; ".join(relevant[:5]))

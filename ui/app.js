@@ -589,6 +589,20 @@ function buildRequestMessages() {
   return msgs;
 }
 
+function restoreComposerFocus() {
+  // Nach dem Senden/Streamen gehoert der Fokus zurueck ins Textfeld. Ein
+  // disabled-Feld (kurzer Server-State-Flap) oder ein Button, der den Fokus
+  // behalten hat, laesst ihn sonst auf <body> zurueck — dann muss man vor
+  // jeder Nachricht neu ins Feld klicken.
+  if (state.view !== 'chat' || !state.server.running) return;
+  const input = $('#input');
+  if (!input || input.disabled) return;
+  const a = document.activeElement;
+  const stray = !a || a === document.body || a === document.documentElement
+    || a === $('#btn-send') || a === $('#btn-unload');
+  if (stray) input.focus({ preventScroll: true });
+}
+
 async function sendMessage() {
   const input = $('#input');
   const text = input.value.trim();
@@ -714,6 +728,7 @@ async function runCompletion() {
     state.chat.abort = null;
     renderChatState();
     scrollChat(true);
+    restoreComposerFocus();
   }
 }
 
@@ -1989,6 +2004,7 @@ function bindEvents() {
       state.server.running = false;
     }
     renderChatState();
+    restoreComposerFocus();
     if (state.view === 'server') updateServerAccessUi();
   });
 }
