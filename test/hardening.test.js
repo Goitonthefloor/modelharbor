@@ -8,6 +8,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const https = require('https');
@@ -87,6 +88,7 @@ test('updater.downloadFile: Schreibfehler (Ziel ist Verzeichnis) wird abgefangen
 
 test('updater.downloadFile: schreibt korrekt und meldet Größe + done', async (t) => {
   const FULL = Buffer.alloc(4096, 0x42);
+  const sha256 = crypto.createHash('sha256').update(FULL).digest('hex');
   const { srv, base } = await startServer((req, res) => {
     res.writeHead(200, { 'Content-Length': String(FULL.length) });
     res.end(FULL);
@@ -95,7 +97,7 @@ test('updater.downloadFile: schreibt korrekt und meldet Größe + done', async (
   const dest = path.join(tmpDir(t), 'update.exe');
   const events = [];
 
-  const res = await updater.downloadFile(`${base}/update.exe`, dest, (p) => events.push(p));
+  const res = await updater.downloadFile(`${base}/update.exe`, dest, (p) => events.push(p), { sha256 });
   assert.equal(res.size, FULL.length);
   assert.deepEqual(fs.readFileSync(dest), FULL);
   assert.equal(events[events.length - 1].phase, 'done');

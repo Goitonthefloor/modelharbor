@@ -231,3 +231,87 @@ test('summary: nennt nur Abweichungen vom Standard', () => {
   const s = ms.summary(ms.resolve({ model: { cacheTypeK: 'q4_0', cacheTypeV: 'q8_0', ctx: 16384, gpuLayers: 20 } }));
   assert.ok(s.includes('K q4_0') && s.includes('V q8_0') && s.includes('FA') && s.includes('ctx 16384') && s.includes('ngl 20'));
 });
+
+/* --------------------------- F3: String-Bools --------------------------- */
+
+test('F3: parseBool akzeptiert true/false/1/0 als Bool und als String, lehnt Rest ab', () => {
+  // Wertematrix: gültige Repräsentationen
+  for (const v of [true, 1, '1', 'true', 'TRUE', ' true ']) assert.equal(ms.parseBool(v), true, `parseBool(${JSON.stringify(v)})`);
+  for (const v of [false, 0, '0', 'false', 'FALSE', ' false ']) assert.equal(ms.parseBool(v), false, `parseBool(${JSON.stringify(v)})`);
+  // Unbekanntes wird abgelehnt (kein Override statt falschem Flag)
+  for (const v of ['', 'bogus', 'yes', '2', -1, null, undefined, {}, []]) assert.equal(ms.parseBool(v), null, `parseBool(${JSON.stringify(v)})`);
+});
+
+test('F3: normalize dreht String-Bools nicht in true um (mlock/noMmap/flashAttn)', () => {
+  const falsch = ms.normalize({ mlock: 'false', noMmap: '0', flashAttn: 'false' });
+  assert.deepEqual(falsch, { mlock: false, noMmap: false, flashAttn: false });
+  // Gegenprobe: echte Wahrheitswerte bleiben wahr
+  assert.deepEqual(ms.normalize({ mlock: true, noMmap: '1', flashAttn: 'true' }), { mlock: true, noMmap: true, flashAttn: true });
+  // Unbekannte Werte landen gar nicht im Patch
+  assert.deepEqual(ms.normalize({ mlock: 'vielleicht', noMmap: 'yes' }), {});
+});
+
+test('F3: llamaArgs erzeugt bei deaktivierten String-Bools keine --mlock/--no-mmap', () => {
+  const args = ms.llamaArgs(ms.resolve({ model: { mlock: 'false', noMmap: '0' } }));
+  assert.ok(!args.includes('--mlock'), 'kein --mlock');
+  assert.ok(!args.includes('--no-mmap'), 'kein --no-mmap');
+  // Gegenprobe: aktivierte Werte setzen die Flags
+  const an = ms.llamaArgs(ms.resolve({ model: { mlock: 'true', noMmap: '1' } }));
+  assert.ok(an.includes('--mlock') && an.includes('--no-mmap'));
+});
+
+/* --------------------------- F3: Vorrangregel --------------------------- */
+
+test('F3: Vorrangregel global < modellspezifisch < expliziter Aufruf (mlock/noMmap/batchSize)', () => {
+  const global = { mlock: true, noMmap: true, batchSize: 1024, threads: 8, ctx: 4096 };
+  // global allein greift jetzt für alle Schlüssel
+  const nurGlobal = ms.resolve({ global });
+  assert.equal(nurGlobal.mlock, true, 'mlock aus global');
+  assert.equal(nurGlobal.noMmap, true, 'noMmap aus global');
+  assert.equal(nurGlobal.batchSize, 1024, 'batchSize aus global');
+  assert.equal(nurGlobal.threads, 8);
+  assert.equal(nurGlobal.ctx, 4096);
+  // modellspezifisch schlägt global
+  const modell = ms.resolve({ global, model: { mlock: false, noMmap: 'false', batchSize: 512, threads: 4 } });
+  assert.equal(modell.mlock, false);
+  assert.equal(modell.noMmap, false);
+  assert.equal(modell.batchSize, 512);
+  assert.equal(modell.threads, 4);
+  // expliziter Aufruf schlägt alles
+  const aufruf = ms.resolve({ global, model: { mlock: false, batchSize: 512 }, call: { mlock: true, noMmap: false, batchSize: 256 } });
+  assert.equal(aufruf.mlock, true);
+  assert.equal(aufruf.noMmap, false);
+  assert.equal(aufruf.batchSize, 256);
+  // fehlt global, bleiben die bisherigen Standardwerte
+  const leer = ms.resolve({});
+  assert.equal(leer.mlock, false);
+  assert.equal(leer.noMmap, false);
+  assert.equal(leer.batchSize, null);
+});
+
+test('F3: globale Werte werden wie Modellwerte validiert (Klemmen statt Durchreichen)', () => {
+  const r = ms.resolve({ global: { ctx: 10, gpuLayers: 5000, batchSize: 1, mlock: 'bogus', threads: 0 } });
+  assert.equal(r.ctx, ms.LIMITS.ctx[0], 'ctx wird auf das Minimum geklemmt');
+  assert.equal(r.gpuLayers, 999);
+  assert.equal(r.batchSize, ms.LIMITS.batchSize[0]);
+  assert.equal(r.threads, 1, 'threads=0 wird auf das Minimum geklemmt, nicht verworfen');
+  assert.equal(r.mlock, false, 'unbekannter Bool fällt auf den Standard zurück');
+});
+
+/* --------------------------- F3: Nebenfälle --------------------------- */
+
+test('F3: NaN/Infinity erzeugen keinen Override, unbekannter Cache-Typ fällt auf f16', () => {
+  assert.deepEqual(ms.normalize({ ctx: NaN, gpuLayers: Infinity, batchSize: 'keine Zahl' }), {});
+  const r = ms.resolve({ global: { ctx: NaN }, model: { cacheTypeK: 'bogus', cacheTypeV: 'q8_0' } });
+  assert.equal(r.ctx, 8192, 'NaN im globalen Wert wird ignoriert');
+  assert.equal(r.cacheTypeK, 'f16', 'unbekannter Cache-Typ wird verworfen');
+  assert.equal(r.cacheTypeV, 'q8_0');
+  assert.ok(r.notes.includes('vCacheNeedsFlashAttn'));
+});
+
+test('F3: RoPE-Frequenzen behalten ihre Nachkommastellen', () => {
+  const out = ms.normalize({ ropeFreqBase: 1000000.5, ropeFreqScale: 0.25 });
+  assert.equal(out.ropeFreqBase, 1000000.5, 'kein Rundungsverlust');
+  assert.equal(out.ropeFreqScale, 0.25);
+  assert.equal(ms.resolve({ model: out }).ropeFreqBase, 1000000.5);
+});

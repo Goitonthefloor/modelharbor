@@ -2,6 +2,39 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.8.1] - 2026-11-24
+
+### Fixed
+
+- **Chat: Fokus bleibt im Eingabefeld.** Nach dem Absenden einer Nachricht hing der Tastaturfokus
+  in manchen Fällen auf dem Senden-Button — man musste vor jeder weiteren Nachricht neu ins
+  Textfeld klicken. Der Fokus kehrt jetzt nach dem Stream-Ende und nach jedem Server-Zustands-
+  wechsel ins Composer-Feld zurück (nur in der Chat-Ansicht, nur bei laufendem Server, nie in ein
+  anderes Feld).
+- **Löschen wirkt jetzt wirklich (F1).** Fehlende Rechte (`EACCES`) oder ein Pfad, der kein
+  Verzeichnis ist (`ENOTDIR`), wurden verschluckt: das Modell blieb liegen, die Oberfläche meldete
+  trotzdem Erfolg. Nur „nicht vorhanden" gilt noch als erledigt, alles andere wird gemeldet.
+- **Kein Löschen mehr außerhalb des Modellordners (F2).** Die Pfadprüfung war rein lexikalisch, ein
+  Symlink im Modellordner auf ein Ziel außerhalb galt als „innerhalb" — und die Datei außerhalb
+  wurde real gelöscht. Geprüft wird jetzt über den aufgelösten Realpfad, für jeden Löschzugriff.
+- **Unbekannte Modell-ID und Sammelpfade werden abgelehnt (F6, F7).** Eine ID ohne Dateiendung tat
+  bisher still nichts; eine Repo-ID (`owner__model`) oder `…/onnx` löschte den ganzen Ordner
+  inklusive aller anderen Quantisierungen. Beides endet jetzt mit einer Fehlermeldung, ONNX wird
+  nur entfernt, wenn dort wirklich ein ONNX-Modell liegt.
+- **Keine unsichtbaren `mmproj`-Waisen mehr (F8).** Beim Löschen des letzten Modells im Ordner geht
+  der Vision-Projektor mit; bleiben andere Quantisierungen, bleibt er erhalten.
+- **String-Bools werden nicht mehr invertiert (F3).** `mlock: "false"` oder `noMmap: "0"` wurden als
+  `true` gelesen und erzeugten `--mlock`/`--no-mmap`. Die Vorrangregel
+  `global < modellspezifisch < expliziter Aufruf` gilt jetzt für jeden Schalter, ungültige Werte
+  werden geklemmt statt durchgereicht.
+- **Updater erkennt echte Major-Updates (F4).** `2.0`, `1.8`, `1.7.4.1` und Vorabversionen wurden
+  nicht geparst, ein Update auf `2.0` galt als „aktuell".
+- **Update-Download wird geprüft (F4).** Der Download verifiziert jetzt den SHA-256 aus den
+  Release-Assets; ein fehlender Digest führt zum Abbruch, eine manipulierte Datei wird gelöscht.
+- **Asset-Auswahl ohne Untergeschobenes (F14).** Unbekannte Plattformen (z. B. `freebsd`) bekamen
+  bisher das Linux-Paket, jede `.exe` galt als Installer. Es zählen nur noch echte
+  Plattform-Pakete und `Setup`-Installer.
+
 ## [1.8.0] - 2026-11-24
 
 ### Security

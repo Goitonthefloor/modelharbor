@@ -259,8 +259,9 @@ test('tok/s: unter 2 Tokens oder ungültige Eingaben ergeben 0', () => {
 const { parseVersion, isNewerVersion, pickAsset } = require('../electron/updater');
 
 test('parseVersion: v-Präfix und reine Zahlen', () => {
-  assert.deepEqual(parseVersion('v1.2.3'), { major: 1, minor: 2, patch: 3 });
-  assert.deepEqual(parseVersion('1.2.3'), { major: 1, minor: 2, patch: 3 });
+  const v123 = { major: 1, minor: 2, patch: 3, build: 0, prerelease: '' };
+  assert.deepEqual(parseVersion('v1.2.3'), v123);
+  assert.deepEqual(parseVersion('1.2.3'), v123);
   assert.equal(parseVersion('abc'), null);
 });
 
@@ -282,7 +283,8 @@ test('pickAsset: plattformspezifische Pakete', () => {
   assert.equal(pickAsset(assets, 'linux').name, 'ModelHarbor-1.1.0.AppImage');
   assert.equal(pickAsset(assets, 'win32').name, 'ModelHarbor-Setup-1.1.0.exe');
   assert.equal(pickAsset(assets, 'darwin').name, 'ModelHarbor-1.1.0-arm64.dmg');
-  assert.equal(pickAsset(assets, 'linux'), pickAsset(assets, 'unknown-platform'));
+  // Unbekannte Plattformen bekommen kein Linux-Paket mehr untergeschoben (F14).
+  assert.equal(pickAsset(assets, 'unknown-platform'), null);
 });
 
 test('pickAsset: kein passendes Asset liefert null', () => {

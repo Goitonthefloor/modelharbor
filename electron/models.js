@@ -8,7 +8,7 @@ const i18n = require('../ui/i18n');
 const path = require('path');
 const https = require('https');
 const { pipeline } = require('stream/promises');
-const { isWithin } = require('./paths');
+const { isWithin, isWithinReal } = require('./paths');
 const { verifyDownload } = require('./integrity');
 
 const HF = 'https://huggingface.co';
@@ -266,6 +266,17 @@ function splitKey(file) {
 function isAuxiliary(file) {
   const b = path.basename(file).toLowerCase();
   return b.startsWith('mmproj') || b.endsWith('.md') || b.includes('imatrix') || b.includes('readme');
+}
+
+/** Echte Modelldatei (GGUF, kein mmproj/imatrix/README)? */
+function isModelGguf(file) {
+  return /\.gguf$/i.test(file) && !isAuxiliary(file);
+}
+
+/** mmproj-Projektor (Vision-Anteil) eines GGUF-Modells. */
+function isVisionProjector(file) {
+  const b = path.basename(file).toLowerCase();
+  return b.startsWith('mmproj') && b.endsWith('.gguf');
 }
 
 function bytesFromSizeEntry(s) {
@@ -812,10 +823,13 @@ async function listLocal(modelsDir, extraDirs = []) {
 }
 
 /**
- * Löscht ein lokales Modell. Bei GGUF-Modellen werden NUR die Dateien dieses
+ * Loescht ein lokales Modell. Bei GGUF-Modellen werden NUR die Dateien dieses
  * Modells (inkl. Split-Parts) entfernt — andere Quants im selben Repo-Ordner
- * bleiben erhalten. Der Ordner wird nur aufgeräumt, wenn er danach leer ist.
+ * bleiben erhalten. Der Ordner wird nur aufgeraeumt, wenn er danach leer ist;
+ * bleibt kein Modell mehr uebrig, gehen verwaiste mmproj-Projektoren mit.
  * Ein ONNX-Modell ist ein Ordner als Ganzes und wird komplett entfernt.
+ * Fehler werden propagiert: ein fehlgeschlagenes Loeschen darf nie als Erfolg
+ * beim Aufrufer ankommen.
  */
 async function deleteModel(modelsDir, modelId) {
   const id = String(modelId || '');
@@ -827,21 +841,57 @@ async function deleteModel(modelsDir, modelId) {
   if (!dirName || dirName === '.' || dirName === '..') throw new Error(i18n.t('error.invalidPath'));
   const dirPath = path.join(modelsDir, dirName);
   if (!isWithin(modelsDir, dirPath)) throw new Error(i18n.t('error.invalidPath'));
-  if (!key || key === 'onnx') {
+  // Nur "<ordner>/<datei>.gguf" oder "<ordner>/onnx": eine blosse Repo-ID wuerde
+  // den ganzen Ordner mit allen Quants loeschen.
+  if (!key) throw new Error(i18n.t('error.invalidPath'));
+
+  let files = [];
+  try { files = await fsp.readdir(dirPath); }
+  catch (err) {
+    if (err.code === 'ENOENT') return; // Ordner fehlt: nichts zu tun
+    throw err; // EACCES/ENOTDIR dürfen nicht als Erfolg durchgehen
+  }
+
+  // Symlink-Schutz: der Ordner muss auch nach dem Aufloesen aller Symlinks
+  // innerhalb des Modellordners liegen, sonst wuerden fremde Dateien geloescht.
+  let inside = false;
+  try { inside = await isWithinReal(modelsDir, dirPath); }
+  catch (err) {
+    if (err.code === 'ENOENT') return;
+    throw err;
+  }
+  if (!inside) throw new Error(i18n.t('error.modelPathOutside'));
+
+  if (key === 'onnx') {
+    // Als Ganzes nur einen echten ONNX-Modellordner entfernen — nicht einen
+    // Repo-Ordner, in dem auch GGUF-Modelle liegen.
+    if (!files.includes('genai_config.json') || files.some(isModelGguf)) {
+      throw new Error(i18n.t('error.invalidPath'));
+    }
     await fsp.rm(dirPath, { recursive: true, force: true });
     return;
   }
-  let files = [];
-  try { files = await fsp.readdir(dirPath); } catch { return; }
+
+  // Nur Dateinamen sind Modell-Schluessel; Pfadanteile oder Sammelpfade nicht.
+  if (key.includes('/') || key.includes('\\') || key === '.' || key === '..') {
+    throw new Error(i18n.t('error.invalidPath'));
+  }
   const targets = files.filter((f) => splitKey(f) === key);
-  if (!targets.length) return; // unbekanntes Modell: nichts löschen, Ordner behalten
+  // Unbekannte ID (z. B. ohne ".gguf"): melden statt still nichts zu tun.
+  if (!targets.length) throw new Error(i18n.t('toast.modelMissing'));
   for (const f of targets) {
     await fsp.rm(path.join(dirPath, f), { force: true });
   }
-  try {
-    const rest = await fsp.readdir(dirPath);
-    if (!rest.length) await fsp.rm(dirPath, { recursive: true, force: true });
-  } catch { /* ignore */ }
+  const rest = await fsp.readdir(dirPath);
+  // Bleibt kein echtes Modell uebrig, sind die mmproj-Projektoren Waisen: sie
+  // waeren in der UI unsichtbar und liessen sich dort nie mehr loeschen.
+  if (!rest.some(isModelGguf)) {
+    for (const f of rest) {
+      if (isVisionProjector(f)) await fsp.rm(path.join(dirPath, f), { force: true });
+    }
+  }
+  const left = await fsp.readdir(dirPath);
+  if (!left.length) await fsp.rm(dirPath, { recursive: true, force: true });
 }
 
 module.exports = {

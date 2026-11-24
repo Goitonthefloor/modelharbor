@@ -50,6 +50,22 @@ function clampInt(value, [min, max], round = true) {
 }
 
 /**
+ * Bool-Parser für Patch-Werte. Die Renderer-Formulare und die gespeicherte
+ * JSON-Datei liefern Bools auch als 'false' / '0' — ein `!!value` würde daraus
+ * `true` machen und llama.cpp falsche Flags geben (--mlock, --no-mmap).
+ * Unbekannte Werte ergeben null (= kein Override).
+ */
+function parseBool(value) {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1') return true;
+  if (value === 0 || value === '0') return false;
+  const s = String(value).trim().toLowerCase();
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  return null;
+}
+
+/**
  * Validiert einen Override-Satz. Unbekannte Schlüssel fliegen raus, Zahlen werden
  * geklemmt, Cache-Typen gegen die Whitelist geprüft, leere Werte entfernt.
  * `ubatchSize` darf nicht größer als `batchSize` sein.
@@ -63,8 +79,9 @@ function normalize(patch) {
     if (v !== null) out[key] = v;
   }
   for (const key of BOOL_KEYS) {
-    if (patch[key] === undefined || patch[key] === null) continue;
-    out[key] = !!patch[key];
+    if (patch[key] === undefined || patch[key] === null || patch[key] === '') continue;
+    const flag = parseBool(patch[key]);
+    if (flag !== null) out[key] = flag;
   }
   for (const key of CACHE_KEYS) {
     const v = patch[key];
@@ -79,13 +96,21 @@ function normalize(patch) {
 
 /**
  * Effektive Werte: global (Einstellungen) < modellspezifisch < expliziter Aufruf.
+ * Alle drei Ebenen laufen durch `normalize`, damit auch globale Werte validiert
+ * werden und die Vorrangregel für JEDEN Schlüssel gilt (vorher fielen mlock,
+ * noMmap und batchSize still auf false/false/null zurück).
  * `flashAttn: null` bedeutet „auto“ (llama.cpp entscheidet).
  * Regel: quantisierter V-Cache erzwingt Flash-Attention, sonst startet llama-server nicht.
  */
 function resolve({ global = {}, model = {}, call = {} } = {}) {
+  const g = normalize(global);
   const m = normalize(model);
   const c = normalize(call);
-  const pick = (key, fallback) => (c[key] !== undefined ? c[key] : (m[key] !== undefined ? m[key] : fallback));
+  const pick = (key, fallback) => (
+    c[key] !== undefined ? c[key]
+      : (m[key] !== undefined ? m[key]
+        : (g[key] !== undefined ? g[key] : fallback))
+  );
 
   const cacheTypeK = pick('cacheTypeK', DEFAULT_CACHE);
   const cacheTypeV = pick('cacheTypeV', DEFAULT_CACHE);
@@ -100,9 +125,9 @@ function resolve({ global = {}, model = {}, call = {} } = {}) {
   if (batchSize !== null && ubatchSize !== null && ubatchSize > batchSize) ubatchSize = batchSize;
 
   return {
-    ctx: pick('ctx', global.ctx || 8192),
-    gpuLayers: pick('gpuLayers', global.gpuLayers !== undefined ? global.gpuLayers : 999),
-    threads: pick('threads', global.threads || null),
+    ctx: pick('ctx', 8192),
+    gpuLayers: pick('gpuLayers', 999),
+    threads: pick('threads', null),
     flashAttn,
     cacheTypeK,
     cacheTypeV,
@@ -171,6 +196,6 @@ async function writeStore(file, data) {
 
 module.exports = {
   CACHE_TYPES, CACHE_BYTES, DEFAULT_CACHE, LIMITS, ALL_KEYS,
-  isQuantized, modelKey, normalize, resolve, kvFactor, llamaArgs, summary,
+  isQuantized, modelKey, parseBool, normalize, resolve, kvFactor, llamaArgs, summary,
   readStore, writeStore,
 };

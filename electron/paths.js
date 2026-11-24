@@ -7,6 +7,7 @@
  * Verzeichnis bleiben. Reine Funktionen, damit in Node testbar.
  */
 const path = require('path');
+const fsp = require('fs/promises');
 const i18n = require('../ui/i18n');
 
 /** Liegt `candidate` innerhalb von `root` (echter Präfix, nicht nur String)? */
@@ -14,6 +15,18 @@ function isWithin(root, candidate) {
   const r = path.resolve(root);
   const c = path.resolve(candidate);
   return c === r || c.startsWith(r + path.sep);
+}
+
+/**
+ * Wie isWithin, loest aber vorher alle Symlinks auf (fs.realpath). Ein Symlink
+ * im Modellordner, der nach draussen zeigt, gilt damit NICHT als "innerhalb".
+ * Fehler (ENOENT/EACCES …) werden nicht verschluckt, sondern an den Aufrufer
+ * gegeben — nur der weiss, ob "nicht vorhanden" ein normaler Zustand ist.
+ */
+async function isWithinReal(root, candidate) {
+  const r = await fsp.realpath(path.resolve(String(root)));
+  const c = await fsp.realpath(path.resolve(String(candidate)));
+  return isWithin(r, c);
 }
 
 /**
@@ -53,4 +66,4 @@ function withinAnyRoot(roots, candidate) {
   throw new Error(i18n.t('error.invalidPath'));
 }
 
-module.exports = { isWithin, childPath, withinRoot, withinAnyRoot };
+module.exports = { isWithin, isWithinReal, childPath, withinRoot, withinAnyRoot };

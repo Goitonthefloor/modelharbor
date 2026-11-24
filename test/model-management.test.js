@@ -100,9 +100,8 @@ test('deleteModel: leere/Traversal-IDs werden abgelehnt, Root bleibt', async (t)
     await assert.rejects(() => models.deleteModel(root, id), `ID ${JSON.stringify(id)} muss abgelehnt werden`);
   }
   assert.ok(fs.existsSync(path.join(root, 'owner__model-GGUF')));
-  // Ein Schlüssel mit Pfadanteilen kann nicht ausbrechen: er wird nur gegen
-  // Dateinamen IM Ordner gematcht und ist hier ein No-op.
-  await models.deleteModel(root, 'owner__model-GGUF/../../etc');
+  // Ein Schlüssel mit Pfadanteilen ist keine Modell-ID und wird abgelehnt.
+  await assert.rejects(() => models.deleteModel(root, 'owner__model-GGUF/../../etc'));
   assert.ok(fs.existsSync(path.join(root, 'owner__model-GGUF')));
 });
 
