@@ -107,7 +107,7 @@ test('readGgufContext: echte Datei, Nicht-GGUF, fehlende Datei, zu kleines Limit
 /* --------------------------- Server-Konfiguration --------------------------- */
 
 test('server-config: Standardwerte und Validierung', () => {
-  assert.deepEqual(sc.resolve({}), { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4 });
+  assert.deepEqual(sc.resolve({}), { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4, corsOrigins: '' });
   assert.deepEqual(sc.resolve(undefined), sc.DEFAULTS);
   const n = sc.normalize({ port: 999999, parallel: 0, lan: 'ja', cors: 0, apiKey: '  abc def \n', bogus: 1 });
   assert.equal(n.port, 65535);
@@ -130,6 +130,36 @@ test('server-config: LAN-Schalter bestimmt die Bind-Adresse', () => {
   assert.equal(sc.bindHost(sc.resolve({ lan: true })), '0.0.0.0');
 });
 
+test('server-config: corsOrigins wird validiert (Zeichen, Länge, leere Einträge)', () => {
+  // Leerzeichen und leere Einträge fliegen raus, Reihenfolge bleibt.
+  assert.equal(
+    sc.normalize({ corsOrigins: ' http://localhost:3000 , ,https://agent.example ' }).corsOrigins,
+    'http://localhost:3000,https://agent.example',
+  );
+  // Einträge mit ungültigen Zeichen (Anführungszeichen, Semikolon, Leerzeichen,
+  // Umlaute) werden verworfen — sie könnten die Kommandozeile zerlegen.
+  const cleaned = sc.normalize({ corsOrigins: 'https://ok.example,"><script>,http://x.example;rm -rf /,böse origin' }).corsOrigins;
+  assert.equal(cleaned, 'https://ok.example');
+  assert.ok(!/[\s;<>"']/.test(cleaned), 'kein Steuer-/Shell-Zeichen in der Liste');
+  // Nur Müll -> leere Liste, nicht etwa der Müll.
+  assert.equal(sc.normalize({ corsOrigins: 'böse origin' }).corsOrigins, '');
+  assert.equal(sc.normalize({ corsOrigins: '' }).corsOrigins, '');
+  assert.equal(sc.normalize({ corsOrigins: ',,,' }).corsOrigins, '');
+  // Länge ist gedeckelt und kappt nie mitten in einer Origin.
+  const long = Array.from({ length: 80 }, (_, i) => `https://host${i}.example`).join(',');
+  const capped = sc.normalize({ corsOrigins: long }).corsOrigins;
+  assert.ok(capped.length <= sc.CORS_ORIGINS_MAX, `Länge ${capped.length} <= ${sc.CORS_ORIGINS_MAX}`);
+  for (const entry of capped.split(',')) assert.ok(/^https:\/\/host\d+\.example$/.test(entry), `keine abgeschnittene Origin: ${entry}`);
+  // resolve() liefert das Feld, Default ist '' (keine eigene Liste).
+  assert.equal(sc.resolve({}).corsOrigins, '');
+  assert.equal(sc.resolve({ corsOrigins: 'https://agent.example' }).corsOrigins, 'https://agent.example');
+  // effectiveCorsOrigins: eigene Liste > cors-Schalter.
+  assert.equal(sc.effectiveCorsOrigins(sc.resolve({ corsOrigins: 'https://a.example', cors: false })), 'https://a.example');
+  assert.equal(sc.effectiveCorsOrigins(sc.resolve({ corsOrigins: 'https://a.example', cors: true })), 'https://a.example');
+  assert.equal(sc.effectiveCorsOrigins(sc.resolve({ cors: false })), 'localhost');
+  assert.equal(sc.effectiveCorsOrigins(sc.resolve({ cors: true })), '');
+});
+
 
 test('connectionInfo: lokale URL immer, LAN-URLs nur mit Schalter — Key immer aktiv', () => {
   const local = sc.connectionInfo(sc.ensureKey({}), ['192.0.2.50']);
@@ -150,6 +180,64 @@ test('connectionInfo: lokale URL immer, LAN-URLs nur mit Schalter — Key immer 
   // Die Ohne-Key-Warnung ist kein Zustand mehr, den die App erreichen kann.
   assert.equal('insecureLan' in lan, false);
   assert.equal('hasKey' in lan, false);
+});
+
+test('runtimeInfo: ips/lanUrls folgen dem laufenden Prozess, nicht der gespeicherten Config', () => {
+  const ips = ['192.0.2.50'];
+  // Gespeichert ist LAN AN, der laufende Prozess bindet aber nur lokal:
+  // dann darf die App keine LAN-URL zeigen, die niemand erreichen kann.
+  const savedLan = sc.resolve({ lan: true, port: 1234 });
+  const runningLocal = sc.runtimeInfo(savedLan, { running: true, lan: false, host: '127.0.0.1', port: 1234, parallel: 4, corsOrigins: '' }, ips);
+  assert.equal(runningLocal.running, true);
+  assert.equal(runningLocal.lan, false);
+  assert.equal(runningLocal.activeLan, false);
+  assert.deepEqual(runningLocal.lanUrls, []);
+  assert.deepEqual(runningLocal.ips, []);
+  assert.equal(runningLocal.localUrl, 'http://127.0.0.1:1234/v1');
+  assert.equal(runningLocal.activeHost, '127.0.0.1');
+
+  // Umgekehrt: laufend mit LAN-Bindung, gespeichert lokal -> LAN-URLs werden gezeigt.
+  const runningLan = sc.runtimeInfo(sc.resolve({ lan: false, port: 1234 }), { running: true, lan: true, host: '0.0.0.0', port: 1234, parallel: 4, corsOrigins: '' }, ips);
+  assert.deepEqual(runningLan.lanUrls, ['http://192.0.2.50:1234/v1']);
+  assert.deepEqual(runningLan.ips, ['192.0.2.50']);
+  assert.equal(runningLan.activeLan, true);
+  assert.equal(runningLan.activeHost, '0.0.0.0');
+
+  // Gestoppt: es gilt die gespeicherte Config.
+  const stopped = sc.runtimeInfo(savedLan, { running: false }, ips);
+  assert.equal(stopped.running, false);
+  assert.deepEqual(stopped.lanUrls, ['http://192.0.2.50:1234/v1']);
+  assert.equal(stopped.activePort, 1234);
+
+  // Der echte Port des laufenden Prozesses schlägt den gespeicherten.
+  const otherPort = sc.runtimeInfo(sc.resolve({ lan: true, port: 1234 }), { running: true, lan: true, port: 4321 }, ips);
+  assert.equal(otherPort.activePort, 4321);
+  assert.deepEqual(otherPort.lanUrls, ['http://192.0.2.50:4321/v1']);
+});
+
+test('restartRequired: nur bei laufendem Server und echter Abweichung', () => {
+  const cfg = sc.resolve({ port: 1234, lan: false, apiKey: 'mh-test', cors: false, parallel: 4 });
+  // So sieht der laufende Prozess aus, wenn er mit genau dieser Config startete.
+  const state = { running: true, host: '127.0.0.1', port: 1234, lan: false, apiKey: 'mh-test', corsOrigins: 'localhost', parallel: 4 };
+  assert.equal(sc.restartRequired(cfg, state), false, 'unverändert -> kein Neustart nötig');
+  assert.equal(sc.restartRequired(cfg, { ...state, running: false }), false, 'gestoppt -> nichts neu zu starten');
+  assert.equal(sc.restartRequired(cfg, {}), false, 'ohne Zustand keine falsche Warnung');
+  // Bindung (LAN-Schalter) geändert
+  assert.equal(sc.restartRequired(sc.resolve({ ...cfg, lan: true }), state), true);
+  // Port geändert
+  assert.equal(sc.restartRequired(sc.resolve({ ...cfg, port: 4321 }), state), true);
+  // API-Key geändert
+  assert.equal(sc.restartRequired(sc.resolve({ ...cfg, apiKey: 'mh-anders' }), state), true);
+  // CORS geändert: Schalter und eigene Origin-Liste
+  assert.equal(sc.restartRequired(sc.resolve({ ...cfg, cors: true }), state), true);
+  assert.equal(sc.restartRequired(sc.resolve({ ...cfg, corsOrigins: 'https://agent.example' }), state), true);
+  // parallele Slots geändert
+  assert.equal(sc.restartRequired(sc.resolve({ ...cfg, parallel: 8 }), state), true);
+  // und dasselbe als Feld in der Info fürs UI
+  assert.equal(sc.runtimeInfo(cfg, state, []).restartRequired, false);
+  assert.equal(sc.runtimeInfo(sc.resolve({ ...cfg, parallel: 8 }), state, []).restartRequired, true);
+  assert.equal(sc.runtimeInfo(sc.resolve({ ...cfg, lan: true }), state, []).restartRequired, true);
+  assert.equal(sc.runtimeInfo(cfg, { ...state, running: false }, []).restartRequired, false);
 });
 
 test('Agenten-Beispiele: tragen immer den Key (kein Platzhalter-Pfad mehr)', () => {
@@ -222,6 +310,31 @@ test('buildArgs: Key-Pflicht heisst Env-Transport — CORS/Slots bleiben optiona
   assert.ok(!args.includes('--cors-origins'));   // Standard * = alle Origins erlaubt
   assert.ok(!args.includes('--parallel'));
   assert.equal(val(args, '--host'), '127.0.0.1');
+});
+
+test('buildArgs: --no-webui schaltet llama.cpps eigene Web-UI ab', () => {
+  // Ohne das Flag liefert llama-server unter GET / eine fremde Web-UI aus —
+  // bei --host 0.0.0.0 sogar ohne Key. ModelHarbor hat seine eigene Oberfläche.
+  const lan = argsWith({ host: '0.0.0.0', port: 1234, apiKey: 'mh-abc' });
+  assert.ok(lan.includes('--no-webui'), 'LAN-Bindung braucht --no-webui');
+  assert.equal(lan.filter((a) => a === '--no-webui').length, 1, 'Flag genau einmal');
+  const local = argsWith({ host: '127.0.0.1', port: 1234 });
+  assert.ok(local.includes('--no-webui'), 'auch lokal keine fremde Web-UI');
+});
+
+test('buildArgs: corsOrigins setzt die Origin-Liste, sonst gilt der cors-Schalter', () => {
+  const own = argsWith({ host: '0.0.0.0', port: 1234, corsOrigins: 'http://localhost:3000,https://agent.example' });
+  assert.equal(val(own, '--cors-origins'), 'http://localhost:3000,https://agent.example');
+  assert.equal(own.filter((a) => a === '--cors-origins').length, 1, 'Flag genau einmal');
+  // Eigene Liste gewinnt gegen den Schalter (in beide Richtungen).
+  assert.equal(val(argsWith({ cors: true, corsOrigins: 'https://a.example' }), '--cors-origins'), 'https://a.example');
+  assert.equal(val(argsWith({ cors: false, corsOrigins: 'https://a.example' }), '--cors-origins'), 'https://a.example');
+  // Kein Zusatz-Flag: Credentials/Wildcard bleibt llama.cpps Sache.
+  assert.ok(!own.includes('--cors-credentials'));
+  assert.ok(!own.includes('--cors'));
+  // Ungültige Liste fällt auf das bisherige Verhalten zurück.
+  assert.equal(val(argsWith({ cors: false, corsOrigins: 'böse origin' }), '--cors-origins'), 'localhost');
+  assert.ok(!argsWith({ cors: true, corsOrigins: 'böse origin' }).includes('--cors-origins'));
 });
 test('buildArgs: Server-Flags und Modell-Einstellungen kombiniert', () => {
   const ms = require('../electron/model-settings.js');
@@ -351,6 +464,11 @@ test('startServer (llama): Key in der Kind-Env, nicht in argv; kein Log/State/Fe
   assert.ok(!argv.includes('--api-key'), 'Key-Flag darf nicht in der Prozess-argv stehen');
   assert.equal(await waitFile(keyFile), cfg.apiKey, 'Key kommt in der Env des Kindprozesses an');
 
+  // Die echte Prozess-argv (nicht nur buildArgs) trägt die Härtungs-Flags.
+  assert.ok(argv.includes('--no-webui'), '--no-webui erreicht den Prozess');
+  assert.equal(argv.filter((a) => a === '--no-webui').length, 1);
+  assert.equal(val(argv, '--alias'), 'ModelHarbor');
+
   // Log-Invariante aus logger.js: niemals Secrets in Logs, State oder Fehlertext.
   const st = srv.getState();
   assert.equal(st.argv, undefined, 'argv wird nicht mehr im State exponiert');
@@ -384,7 +502,67 @@ test('startServer (ONNX): Key in der Kind-Env, nicht in argv; Logs bleiben key-f
   assert.ok(!argv.includes(cfg.apiKey), 'ONNX: Key-Wert nicht in argv');
   assert.ok(!argv.includes('--api-key'), 'ONNX: Key-Flag nicht in argv');
   assert.equal(await waitFile(keyFile), cfg.apiKey, 'ONNX: Key kommt in der Kind-Env an');
+  // Der eigene ONNX-Server ist keine llama.cpp: dort gibt es keine Web-UI,
+  // also auch kein --no-webui (und keine llama-spezifischen Slot-Flags).
+  assert.ok(!argv.includes('--no-webui'), 'ONNX-Pfad bleibt ohne llama.cpp-Flags');
+  assert.ok(!argv.includes('--parallel'), 'ONNX kennt keine --parallel-Slots');
   for (const l of srv.getState().logs) {
     assert.ok(!String(l.line).includes(cfg.apiKey), 'ONNX-Logzeile leakt den Key');
   }
+});
+
+/* --------------------- Portwahl und CORS bis in den Prozess --------------------- */
+
+test('freePort: bindet auf der übergebenen Adresse (host-aware)', async () => {
+  const { freePort: findPort } = require('../electron/server.js');
+
+  // 1) Ein auf 127.0.0.1 belegter Port wird übersprungen.
+  const blocker = net.createServer();
+  await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
+  const busy = blocker.address().port;
+  const next = await findPort(busy, '127.0.0.1');
+  assert.notEqual(next, busy, 'belegter Port darf nicht zurückkommen');
+  assert.ok(next > busy, `nächster freier Port nach ${busy} (${next})`);
+  await new Promise((r) => blocker.close(r));
+
+  // 2) Der Host landet wirklich in listen(): eine Adresse, die es auf diesem
+  //    Rechner nicht gibt, kann keinen Port liefern (203.0.113.0/24 = TEST-NET-3,
+  //    bind scheitert sofort mit EADDRNOTAVAIL). Mit der früher fest verdrahteten
+  //    127.0.0.1 wäre diese Prüfung erfolgreich — sie beweist also den Parameter.
+  await assert.rejects(() => findPort(50000, '203.0.113.7'), /Kein freier Port|No free port/);
+  // Gegenprobe: dieselbe Portnummer ist lokal frei.
+  assert.equal(typeof await findPort(50000, '127.0.0.1'), 'number');
+});
+
+test('startServer (llama): corsOrigins erreicht den Prozess als --cors-origins', async (t) => {
+  const dir = tmpDir(t);
+  const serverPath = path.join(dir, 'llama-server');
+  const modelPath = path.join(dir, 'm.gguf');
+  const argvFile = path.join(dir, 'argv.txt');
+  const keyFile = path.join(dir, 'key.txt');
+  fakeBackend(serverPath, argvFile, keyFile, 'LLAMA_API_KEY');
+  fs.writeFileSync(modelPath, 'GGUF');
+  const srv = require('../electron/server.js');
+  const cfg = {
+    ...sc.ensureKey({ lan: true }),
+    // main.js reicht die Bindung als host durch (bindHost: LAN = 0.0.0.0).
+    host: sc.bindHost(sc.resolve({ lan: true })),
+    corsOrigins: 'http://localhost:3000,https://agent.example',
+    port: await freePort(),
+  };
+  let err = null;
+  try {
+    await srv.startServer({ serverPath, modelPath, presetId: 'balanced', serverConfig: cfg });
+  } catch (e) { err = e; }
+  assert.ok(err, 'Schein-Backend beendet sich sofort -> Start muss scheitern');
+
+  const argv = (await waitFile(argvFile)).split('\n').filter(Boolean);
+  assert.equal(val(argv, '--host'), '0.0.0.0', 'LAN-Schalter bindet nach außen');
+  assert.equal(val(argv, '--cors-origins'), 'http://localhost:3000,https://agent.example');
+  assert.ok(argv.includes('--no-webui'));
+  assert.ok(!argv.includes('--cors'));
+  // Der laufende Zustand kennt die benutzte Origin-Liste (Basis für restartRequired).
+  const st = srv.getState();
+  assert.equal(st.corsOrigins, 'http://localhost:3000,https://agent.example');
+  assert.equal(st.lan, true);
 });

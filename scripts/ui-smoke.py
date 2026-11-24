@@ -15,9 +15,9 @@ URL = Path(__file__).resolve().parent.parent.joinpath('ui', 'index.html').as_uri
 API_MOCK = """
 window.__apiCalls = [];
 window.__srvCfgCalls = [];
-window.__srvCfg = { port: 1234, lan: false, apiKey: 'mh-testkey-0123456789abcdef', cors: true, parallel: 4 };
+window.__srvCfg = { port: 1234, lan: false, apiKey: 'mh-testkey-0123456789abcdef', cors: true, corsOrigins: '', parallel: 4 };
 window.__keySeq = 0;
-window.__srvInfo = { ips: [], endpoints: [
+window.__srvInfo = { ips: [], restartRequired: false, endpoints: [
   { path: '/v1/chat/completions', method: 'POST' }, { path: '/v1/completions', method: 'POST' },
   { path: '/v1/models', method: 'GET' }, { path: '/health', method: 'GET' }] };
 window.__settingsCalls = [];
@@ -653,6 +653,69 @@ with sync_playwright() as p:
           and any(c.get("cors") is False for c in cfg["saved"])
           and any(c.get("parallel") == 8 for c in cfg["saved"]),
           json.dumps(cfg["saved"], ensure_ascii=False))
+
+    origins = page.evaluate("""async () => {
+      window.__srvCfgCalls = [];
+      const el = document.querySelector('#srv-cors-origins');
+      const before = { present: !!el, hasHint: !!document.querySelector('.settings-label span') };
+      el.value = 'https://app.example, http://192.0.2.50:3000';
+      el.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 300));
+      return { ...before, saved: window.__srvCfgCalls.slice() };
+    }""")
+    check("CORS-Origins: Feld vorhanden und wird gespeichert",
+          origins["present"] and any(
+              c.get("corsOrigins") == "https://app.example, http://192.0.2.50:3000"
+              for c in origins["saved"]),
+          json.dumps(origins, ensure_ascii=False))
+
+    reveal = page.evaluate("""async () => {
+      const field = document.querySelector('#srv-key');
+      const btn = document.querySelector('[data-act="srv-reveal"]');
+      const kindClosed = field.type;
+      btn.click();
+      await new Promise(r => setTimeout(r, 120));
+      const kindOpen = field.type;
+      const pressedOpen = btn.getAttribute('aria-pressed');
+      btn.click();
+      await new Promise(r => setTimeout(r, 120));
+      return { kindClosed, kindOpen, pressedOpen, kindClosedAgain: field.type,
+               label: btn.getAttribute('title') };
+    }""")
+    check("API-Key im Feld: standardmäßig verdeckt, per Auge umschaltbar",
+          reveal["kindClosed"] == "password" and reveal["kindOpen"] == "text"
+          and reveal["pressedOpen"] == "true" and reveal["kindClosedAgain"] == "password",
+          json.dumps(reveal, ensure_ascii=False))
+
+    masked = page.evaluate("""() => {
+      const cell = document.querySelector('.srv-kv.srv-kv-key .srv-value');
+      const full = window.__srvCfg.apiKey;
+      const shown = cell ? cell.textContent : '';
+      return { shown, full, leaks: !!shown && shown.includes(full),
+               copyValue: (state.srvCopy || {}).key === full };
+    }""")
+    check("Agenten-Karte zeigt den Key maskiert, Kopieren liefert den vollen Wert",
+          masked["shown"] and not masked["leaks"] and masked["copyValue"] is True,
+          json.dumps(masked, ensure_ascii=False))
+
+    restart = page.evaluate("""async () => {
+      window.__srvInfo = { ...window.__srvInfo, restartRequired: true };
+      await refreshServerConfig();
+      updateServerAccessUi();
+      await new Promise(r => setTimeout(r, 150));
+      const shown = !!document.querySelector('#srv-restart .srv-restart');
+      const hasBtn = !!document.querySelector('[data-act="srv-restart"]');
+      const text = document.querySelector('#srv-restart').textContent.trim();
+      window.__srvInfo = { ...window.__srvInfo, restartRequired: false };
+      await refreshServerConfig();
+      updateServerAccessUi();
+      await new Promise(r => setTimeout(r, 150));
+      return { shown, hasBtn, text, goneWhenFalse: !document.querySelector('#srv-restart .srv-restart') };
+    }""")
+    check("Neustart-Hinweis erscheint nur bei restartRequired und verschwindet wieder",
+          restart["shown"] and restart["hasBtn"] and restart["goneWhenFalse"] is True
+          and len(restart["text"]) > 0,
+          json.dumps(restart, ensure_ascii=False))
 
     copy = page.evaluate("""async () => {
       clearToasts();

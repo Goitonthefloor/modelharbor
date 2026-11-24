@@ -1192,6 +1192,41 @@ function serverAccess() {
   };
 }
 
+/** Key maskiert darstellen: erste 6 Zeichen + '…' + letzte 4 (kurze Keys gar nicht). */
+function maskSecret(value) {
+  const s = String(value || '');
+  if (!s) return '';
+  if (s.length <= 12) return '••••••••';
+  return s.slice(0, 6) + '…' + s.slice(-4);
+}
+
+/** Neustart-Hinweis: nur wenn das Backend restartRequired meldet (ältere Backends kennen es nicht). */
+function renderServerRestart() {
+  const host = $('#srv-restart');
+  if (!host) return;
+  const info = state.serverInfo || {};
+  if (info.restartRequired !== true) { host.innerHTML = ''; return; }
+  host.innerHTML = `<p class="srv-restart">
+      <span>${esc(t('server.restartRequired'))}</span>
+      <button class="btn btn-ghost btn-sm" data-act="srv-restart">${esc(t('server.restartNow'))}</button>
+    </p>`;
+}
+
+/** Key-Feld zwischen Klartext und Punkten umschalten (Anzeige, nicht der gespeicherte Wert). */
+function toggleServerKeyVisibility() {
+  const input = $('#srv-key');
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  const btn = $('[data-act="srv-reveal"]');
+  if (!btn) return;
+  const label = t(show ? 'server.hideKey' : 'server.revealKey');
+  btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+  btn.setAttribute('aria-label', label);
+  btn.setAttribute('title', label);
+  btn.classList.toggle('is-on', show);
+}
+
 function renderServerStatus() {
   const pill = $('#srv-status');
   if (!pill) return;
@@ -1204,6 +1239,7 @@ function renderServerStatus() {
 /** Warnung + Agenten-Karte auffrischen, ohne die Eingabefelder neu zu bauen (Fokus bleibt). */
 function updateServerAccessUi() {
   renderServerStatus();
+  renderServerRestart();
   const a = serverAccess();
   renderServerAgents();
   const start = $('#srv-start');
@@ -1234,8 +1270,8 @@ function renderServerAgents() {
     json: snip.agentJson(cfg, exampleIp),
   };
   const copyBtn = (key) => `<button class="btn btn-ghost btn-sm" data-act="srv-copy" data-copy-key="${key}">${esc(t('server.copy'))}</button>`;
-  const row = (label, value, key, hint) => `
-    <div class="srv-kv">
+  const row = (label, value, key, hint, cls) => `
+    <div class="srv-kv${cls ? ' ' + cls : ''}">
       <div class="srv-kv-label">${esc(label)}${hint ? `<span>${esc(hint)}</span>` : ''}</div>
       <code class="srv-value">${esc(value)}</code>
       ${value ? copyBtn(key) : ''}
@@ -1251,7 +1287,7 @@ function renderServerAgents() {
     ${row(t('server.baseUrl'), localUrl, 'localUrl')}
     ${a.lan ? lanUrls.map((u, i) => row(`${t('server.baseUrlLan')}${lanUrls.length > 1 ? ' ' + (i + 1) : ''}`, u, i === 0 ? 'lanUrl' : '')).join('') : ''}
     ${row(t('server.modelName'), snip.MODEL_ALIAS, 'model', t('server.modelNameHint'))}
-    ${a.apiKey ? row(t('server.apiKey'), a.apiKey, 'key') : ''}
+    ${a.apiKey ? row(t('server.apiKey'), maskSecret(a.apiKey), 'key', '', 'srv-kv-key') : ''}
     <div class="srv-kv">
       <div class="srv-kv-label">${esc(t('server.endpoints'))}</div>
       <div class="srv-endpoints">${endpoints.map((e) => `<code>${esc(e.method)} ${esc(e.path)}</code>`).join('')}</div>
@@ -1309,7 +1345,8 @@ function renderServer() {
       </div>
       <div class="settings-row">
         <div class="settings-label"><strong>${esc(t('server.apiKey'))}</strong><span>${esc(t('server.apiKeyHint'))}</span></div>
-        <input type="text" class="srv-key" id="srv-key" value="${esc(cfg.apiKey || '')}" placeholder="${esc(t('server.apiKeyPlaceholder'))}" autocomplete="off" spellcheck="false">
+        <input type="password" class="srv-key" id="srv-key" value="${esc(cfg.apiKey || '')}" placeholder="${esc(t('server.apiKeyPlaceholder'))}" autocomplete="off" spellcheck="false">
+        <button class="btn btn-ghost btn-sm srv-key-eye" data-act="srv-reveal" aria-pressed="false" aria-label="${esc(t('server.revealKey'))}" title="${esc(t('server.revealKey'))}">👁</button>
         <button class="btn btn-ghost btn-sm" data-act="srv-genkey">${esc(t('server.generateKey'))}</button>
       </div>
       <div class="settings-row">
@@ -1317,10 +1354,15 @@ function renderServer() {
         <input type="checkbox" id="srv-cors"${cfg.cors !== false ? ' checked' : ''}>
       </div>
       <div class="settings-row">
+        <div class="settings-label"><strong>${esc(t('server.corsOrigins'))}</strong><span>${esc(t('server.corsOriginsHint'))}</span></div>
+        <input type="text" class="srv-key srv-origins" id="srv-cors-origins" value="${esc(cfg.corsOrigins || '')}" placeholder="${esc(t('server.corsOriginsPlaceholder'))}" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="settings-row">
         <div class="settings-label"><strong>${esc(t('server.parallel'))}</strong><span>${esc(t('server.parallelHint'))}</span></div>
         <input type="number" class="num-input" id="srv-parallel" min="1" max="64" step="1" value="${esc(cfg.parallel)}">
       </div>
       <p class="srv-hint">${esc(t('server.applyHint'))}</p>
+      <div id="srv-restart"></div>
     </div>
 
     <div class="card srv-card">
@@ -1344,6 +1386,8 @@ function renderServer() {
   const cors = $('#srv-cors');
   if (lan) lan.addEventListener('change', () => applyServerConfig({ lan: lan.checked }));
   if (cors) cors.addEventListener('change', () => applyServerConfig({ cors: cors.checked }));
+  const corsOrigins = $('#srv-cors-origins');
+  if (corsOrigins) corsOrigins.addEventListener('change', () => applyServerConfig({ corsOrigins: corsOrigins.value.trim() }));
   const modelSel = $('#srv-model');
   if (modelSel) modelSel.addEventListener('change', () => { state.serverModelId = modelSel.value; });
   const presetSel = $('#srv-preset');
@@ -1380,6 +1424,30 @@ async function stopServerFromTab() {
   toast(t('server.stoppedToast'), 'ok', 4000);
   await refreshServerConfig();
   renderServer();
+}
+
+/** Server mit der gespeicherten Konfiguration neu starten (Änderungen greifen nur beim Start). */
+async function restartServerFromTab() {
+  if (!state.server.running) {
+    await refreshServerConfig();
+    renderServer();
+    toast(t('server.notRunningHint'), 'error', 6000);
+    return;
+  }
+  const modelId = state.serverModelId;
+  const preset = state.serverPreset || undefined;
+  const model = state.local.find((m) => m.id === modelId);
+  await unloadModel(true);
+  await refreshServerConfig();
+  if (!model) {
+    renderServer();
+    toast(t('server.selectModelFirst'), 'error', 6000);
+    return;
+  }
+  await loadModel(model, { presetOverride: preset, stay: true });
+  await refreshServerConfig();
+  renderServer();
+  toast(t('server.restartedToast'), 'ok', 4000);
 }
 
 async function generateServerKey() {
@@ -1781,6 +1849,8 @@ function bindEvents() {
     if (act === 'srv-start') { await startServerFromTab(); }
     if (act === 'srv-stop') { await stopServerFromTab(); }
     if (act === 'srv-genkey') { await generateServerKey(); }
+    if (act === 'srv-reveal') { toggleServerKeyVisibility(); }
+    if (act === 'srv-restart') { await restartServerFromTab(); }
     if (act === 'srv-copy') { await copyServerValue(btn.dataset.copyKey); }
     if (act === 'open-models') { ipc(bridge.shell.showModels()); }
     if (act === 'add-source') {

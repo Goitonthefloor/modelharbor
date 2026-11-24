@@ -215,8 +215,28 @@
     'server.apiKeyHint': { de: 'Immer aktiv — der Server startet nie ohne Key. Chat und Agenten benutzen ihn automatisch.', en: 'Always on — the server never starts without a key. Chat and agents use it automatically.' },
     'server.apiKeyPlaceholder': { de: 'Leer lassen = neuen Key erzeugen', en: 'Leave empty to generate a new key' },
     'server.generateKey': { de: 'Key neu erzeugen', en: 'Regenerate key' },
-    'server.cors': { de: 'CORS erlauben (alle Origins)', en: 'Allow CORS (all origins)' },
-    'server.corsHint': { de: 'Aus = nur same-origin (localhost)', en: 'Off = same-origin only (localhost)' },
+    'server.cors': { de: 'CORS erlauben', en: 'Allow CORS' },
+    'server.corsHint': {
+      de: 'Ein = jede Webseite darf zugreifen (Standard). Origins unten eintragen, um das zu begrenzen.',
+      en: 'On = any website may access (default). List origins below to restrict that.',
+    },
+    'server.corsOrigins': { de: 'Erlaubte Origins', en: 'Allowed origins' },
+    'server.corsOriginsHint': {
+      de: 'Kommagetrennt; leer = alle Origins. Nur nötig, wenn Browser-Anwendungen zugreifen sollen.',
+      en: 'Comma separated; empty = all origins. Only needed for browser-based clients.',
+    },
+    'server.corsOriginsPlaceholder': { de: 'https://app.example, http://192.0.2.50:3000', en: 'https://app.example, http://192.0.2.50:3000' },
+    'server.revealKey': { de: 'Key anzeigen', en: 'Show key' },
+    'server.hideKey': { de: 'Key verbergen', en: 'Hide key' },
+    'server.restartRequired': {
+      de: 'Gespeicherte Einstellungen sind noch nicht aktiv — der Server läuft weiter mit der alten Konfiguration.',
+      en: 'Saved settings are not active yet — the server keeps running with the old configuration.',
+    },
+    'server.restartNow': { de: 'Jetzt neu starten', en: 'Restart now' },
+    'server.restartedToast': {
+      de: 'Server mit der neuen Konfiguration neu gestartet',
+      en: 'Server restarted with the new configuration',
+    },
     'server.parallel': { de: 'Parallele Anfragen', en: 'Parallel requests' },
     'server.parallelHint': { de: 'Gleichzeitige Slots für mehrere Agenten — das Kontextfenster wird auf die Slots aufgeteilt', en: 'Concurrent slots for several agents — the context window is split across slots' },
     'server.applyHint': {

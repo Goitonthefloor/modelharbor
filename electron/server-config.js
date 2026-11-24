@@ -20,13 +20,54 @@ const crypto = require('crypto');
 const snippets = require('../ui/server-snippets');
 const { MODEL_ALIAS, baseUrl, curlExample, pythonExample, agentJson } = snippets;
 
-const DEFAULTS = { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4 };
+const DEFAULTS = { port: 1234, lan: false, apiKey: '', cors: true, parallel: 4, corsOrigins: '' };
 const LIMITS = { port: [1024, 65535], parallel: [1, 64] };
+// CORS-Origins: kommagetrennte Liste. Nur Zeichen, die in einer Origin
+// vorkommen können (Schema/Host/Port/Wildcard) — keine Leerzeichen, keine
+// Steuerzeichen, nichts, was die Kommandozeile zerlegt.
+const CORS_ORIGINS_MAX = 512;
+const CORS_ORIGIN_ENTRY = /^[A-Za-z0-9:/._*-]+$/;
 
 function clampInt(value, [min, max]) {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return null;
   return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * Bringt eine CORS-Origins-Liste in die Form, die als Flag taugt:
+ * kommagetrennt, ohne Leerzeichen, ohne leere Einträge, ohne Einträge mit
+ * ungültigen Zeichen. Leerer String = „keine eigene Liste“.
+ * Ohne diese Prüfung könnte ein Wert mit Leerzeichen oder Semikolon die
+ * Kommandozeile zerlegen bzw. ungewollte Flags erzeugen.
+ */
+function normalizeCorsOrigins(value) {
+  if (Array.isArray(value)) value = value.join(',');
+  const raw = String(value === undefined || value === null ? '' : value);
+  const list = [];
+  let len = 0;
+  for (const part of raw.split(',')) {
+    const entry = part.trim();
+    if (!entry) continue;                       // leere Einträge fliegen raus
+    if (!CORS_ORIGIN_ENTRY.test(entry)) continue; // ungültige Zeichen: Eintrag verwerfen
+    const add = list.length ? entry.length + 1 : entry.length;
+    if (len + add > CORS_ORIGINS_MAX) break;    // nie mitten in einer Origin kappen
+    list.push(entry);
+    len += add;
+  }
+  return list.join(',');
+}
+
+/**
+ * Der Wert, der wirklich als --cors-origins gesetzt wird ('' = kein Flag).
+ * Vorrang: eigene Liste > cors-Schalter (false = nur localhost) > kein Flag.
+ * llama.cpps Default ohne Flag ist `*` und reflektiert jede Origin — deshalb
+ * ist eine gesetzte Liste immer besser als gar keine.
+ */
+function effectiveCorsOrigins(cfg) {
+  const own = normalizeCorsOrigins((cfg && cfg.corsOrigins) || '');
+  if (own) return own;
+  return cfg && cfg.cors === false ? 'localhost' : '';
 }
 
 /** Validiert einen Konfigurations-Patch; Unbekanntes/Leeres fliegt raus. */
@@ -41,6 +82,9 @@ function normalize(patch) {
   for (const key of ['lan', 'cors']) {
     if (patch[key] === undefined || patch[key] === null) continue;
     out[key] = !!patch[key];
+  }
+  if (patch.corsOrigins !== undefined && patch.corsOrigins !== null) {
+    out.corsOrigins = normalizeCorsOrigins(patch.corsOrigins);
   }
   if (patch.apiKey !== undefined && patch.apiKey !== null) {
     // Keine Leerzeichen/Umbrüche im Key — sonst zerlegt die Kommandozeile ihn.
@@ -116,8 +160,55 @@ function generateKey() {
   return `mh-${crypto.randomBytes(24).toString('base64url')}`;
 }
 
+/**
+ * Weicht der laufende Prozess von der gespeicherten Konfiguration ab, hilft nur
+ * ein Neustart: Bindung, Port, Key, CORS und parallele Slots stehen in der
+ * Kommandozeile bzw. in der Kind-Env und werden nicht nachgezogen.
+ * `state` kommt aus server.getState(); fehlende Felder gelten als „unbekannt“
+ * und lösen keine falsche Warnung aus.
+ */
+function restartRequired(cfg, state = {}) {
+  const st = state || {};
+  if (!st.running) return false;
+  if (st.host && st.host !== bindHost(cfg)) return true;
+  if (st.port && Number(st.port) !== Number(cfg.port)) return true;
+  if (!!st.lan !== !!cfg.lan) return true;
+  if (typeof st.apiKey === 'string' && st.apiKey !== String((cfg && cfg.apiKey) || '')) return true;
+  if (typeof st.corsOrigins === 'string' && st.corsOrigins !== effectiveCorsOrigins(cfg)) return true;
+  if (st.parallel !== undefined && st.parallel !== null && Number(st.parallel) !== Number(cfg.parallel)) return true;
+  return false;
+}
+
+/**
+ * Vollständige Server-Info fürs UI: Verbindungsdaten plus Laufzeitzustand.
+ * Adressen (ips/lanUrls) folgen dem LAUFENDEN Prozess — sonst zeigt der
+ * Server-Tab LAN-URLs an, die niemand erreichen kann, weil der Server lokal
+ * gebunden ist (oder umgekehrt).
+ */
+function runtimeInfo(cfg, state = {}, ips = []) {
+  const st = state || {};
+  const running = !!st.running;
+  const lan = running ? !!st.lan : !!cfg.lan;
+  const port = st.port || cfg.port;
+  const active = { ...cfg, lan, port };
+  const info = connectionInfo(active, lan ? ips : []);
+  return {
+    ...info,
+    running,
+    starting: !!st.starting,
+    // Im Betrieb zählt die tatsächlich gebundene Adresse/die echte Portnummer.
+    activePort: port,
+    activeHost: st.host || bindHost(cfg),
+    activeLan: lan,
+    model: st.model || null,
+    error: st.error || null,
+    restartRequired: restartRequired(cfg, st),
+  };
+}
+
 module.exports = {
-  DEFAULTS, LIMITS, MODEL_ALIAS,
-  normalize, resolve, ensureKey, bindHost, lanAddresses, baseUrl, connectionInfo,
+  DEFAULTS, LIMITS, MODEL_ALIAS, CORS_ORIGINS_MAX,
+  normalize, normalizeCorsOrigins, effectiveCorsOrigins, resolve, ensureKey, bindHost,
+  lanAddresses, baseUrl, connectionInfo, runtimeInfo, restartRequired,
   authHeaderValue, curlExample, pythonExample, agentJson, generateKey,
 };

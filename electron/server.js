@@ -9,6 +9,7 @@ const i18n = require('../ui/i18n');
 const fs = require('fs');
 const http = require('http');
 const { samplingArgs, getPreset } = require('./presets');
+const scfg = require('./server-config');
 
 let proc = null;
 let state = {
@@ -17,6 +18,8 @@ let state = {
   pid: null,
   port: null,
   host: null,
+  corsOrigins: '',
+  parallel: null,
   apiKey: '',
   lan: false,
   model: null,
@@ -42,7 +45,12 @@ function setState(patch) {
 }
 function getState() { return { ...state, logs: logs.slice(-200) }; }
 
-function freePort(start = 9931) {
+/**
+ * Sucht einen freien Port. `host` muss die Adresse sein, an die der Server
+ * später wirklich bindet: ein auf der LAN-IP belegter Port ist bei einer
+ * Prüfung gegen 127.0.0.1 unsichtbar.
+ */
+function freePort(start = 9931, host = '127.0.0.1') {
   return new Promise((resolve, reject) => {
     let port = start;
     let attempts = 0;
@@ -53,7 +61,7 @@ function freePort(start = 9931) {
       srv.once('listening', () => {
         srv.close(() => resolve(port));
       });
-      srv.listen(port, '127.0.0.1');
+      srv.listen(port, host);
     };
     tryPort();
   });
@@ -105,14 +113,21 @@ function buildArgs({ serverPath, modelPath, presetId, overrides = {}, ctx, gpuLa
     '--fit', 'on',
     '--jinja',
     '--no-perf',
+    // Ohne dieses Flag liefert llama-server unter GET / seine eigene Web-UI
+    // aus — auch bei --host 0.0.0.0 und ohne API-Key. ModelHarbor hat seine
+    // eigene Oberfläche; die fremde UI ist nur unnötige Angriffsfläche.
+    '--no-webui',
   ];
   // Server-Zugang für Agenten: API-Key, CORS, parallele Slots.
   // Kein simples --cors in llama.cpp: CORS läuft über --cors-origins
   // (Standard * = alle Origins; „localhost“ = nur same-origin).
+  // Eine eigene Origin-Liste (corsOrigins) hat Vorrang; sonst gilt der
+  // cors-Schalter wie bisher (false → localhost, true → kein Flag).
   // Der Key wandert NICHT in die Kommandozeile: /proc/<pid>/cmdline ist auf
   // Linux für alle lokalen Benutzer lesbar. llama-server liest ihn aus der
   // Env-Variable LLAMA_API_KEY (startServer setzt sie nur für den Kindprozess).
-  if (sc.cors === false) args.push('--cors-origins', 'localhost');
+  const corsOrigins = scfg.effectiveCorsOrigins(sc);
+  if (corsOrigins) args.push('--cors-origins', corsOrigins);
   if (sc.parallel) args.push('--parallel', String(sc.parallel));
   const cpuCount = (require('os').cpus() || []).length || 4;
   const t = r.threads || Math.max(2, cpuCount - 1);
@@ -162,7 +177,7 @@ async function startServer(opts) {
   const fixedPort = opts.port || sc.port || null;
   // Fester Port (Server-Tab): nicht still ausweichen, sondern klar melden.
   if (fixedPort) await assertPortFree(fixedPort, host);
-  const port = fixedPort || await freePort(9931);
+  const port = fixedPort || await freePort(9931, host);
   const ctx = (opts.resolved && opts.resolved.ctx) || overrides.ctx || 8192;
   const gpuLayers = opts.resolved ? opts.resolved.gpuLayers
     : (overrides.gpuLayers !== undefined ? overrides.gpuLayers : 999);
@@ -203,7 +218,14 @@ async function startServer(opts) {
   }
 
   logs = [];
-  setState({ running: false, starting: true, pid: null, port, host, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1', model: modelPath, preset: presetId, startedAt: null, error: null });
+  // Merken, womit der Prozess wirklich läuft: Bindung, Port, Key, CORS und
+  // parallele Slots stecken in argv/Env und ändern sich nicht im Betrieb.
+  // Das UI vergleicht damit die gespeicherte Konfiguration (restartRequired).
+  const effectiveCors = isOnnx
+    ? (sc.cors === false ? 'localhost' : '*')
+    : scfg.effectiveCorsOrigins(sc);
+  const effectiveParallel = sc.parallel ? Number(sc.parallel) : null;
+  setState({ running: false, starting: true, pid: null, port, host, corsOrigins: effectiveCors, parallel: effectiveParallel, apiKey: sc.apiKey || '', lan: host !== '127.0.0.1', model: modelPath, preset: presetId, startedAt: null, error: null });
   logger.debug(`startServer mode=${isOnnx ? 'onnx' : 'llama'} executable=${path.basename(executable)} argv=${args.join(' ')}`);
   pushLog(`Starte: ${path.basename(executable)} ${args.join(' ')}`, 'info');
 

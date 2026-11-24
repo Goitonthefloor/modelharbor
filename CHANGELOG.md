@@ -2,6 +2,43 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.8.0] - 2026-11-24
+
+### Security
+
+- **llama.cpp-Web-UI abgeschaltet (`--no-webui`):** Im LAN-Betrieb lieferte llama-server auf
+  `GET /` seine eigene Chat-Oberfläche aus — ohne API-Key. ModelHarbor bringt seine eigene
+  Oberfläche mit, die fremde UI war reine Angriffsfläche. Der Schalter wird jetzt immer gesetzt
+  (lokal wie im LAN); der ONNX-Pfad bleibt unberührt.
+- **CORS ist jetzt begrenzbar:** Bisher bedeutete „CORS an" gar kein Flag — also llama.cpps
+  Default `*`, und der Server spiegelte jede anfragende Origin inklusive
+  `Access-Control-Allow-Credentials: true` zurück. Neu: Feld **Erlaubte Origins**
+  (kommagetrennt, maximal 512 Zeichen, Zeichensatz validiert). Bleibt es leer, gilt weiter der
+  bisherige Default; ist es gefüllt, geht die Liste als `--cors-origins` an den Server. Der
+  Hilfetext sagt nun ehrlich, dass „an" jede Webseite zulässt.
+- **API-Key nicht mehr im Klartext im Fenster:** Das Key-Feld ist ein Passwortfeld mit
+  Auge-Schalter (an/aus), und die Agenten-Karte zeigt den Key nur noch maskiert
+  (erste 6 Zeichen … letzte 4). Der Kopieren-Button liefert weiterhin den vollen Wert.
+
+### Behoben
+
+- **Agenten-Adressen folgen dem laufenden Server:** `serverInfo()` berechnete LAN-URLs aus der
+  *gespeicherten* Konfiguration. Nach dem Umlegen des LAN-Schalters am laufenden Server standen
+  dort Adressen, die nicht erreichbar waren. `ips`/`lanUrls` richten sich jetzt nach dem
+  laufenden Prozess.
+- **Neustart-Bedarf wird sichtbar:** Port, LAN, Key, CORS und Slots wirken erst beim nächsten
+  Start. Weicht die laufende Konfiguration von der gespeicherten ab, meldet das Backend
+  `restartRequired` und der Server-Tab bietet **Jetzt neu starten** an (stoppt und startet mit
+  der aktuellen Konfiguration, gleiches Modell, gleiches Preset).
+- **Portprüfung kennt die Bindungsadresse:** `freePort()` prüfte immer nur `127.0.0.1`. Bei
+  LAN-Bindung konnte ein auf der LAN-Adresse belegter Port durchrutschen.
+
+### Tests
+
+- 187 Node-Tests (vorher 180) und 45 UI-Smoke-Checks (vorher 41) — neu abgedeckt: `--no-webui`
+  im Startargumenten, `--cors-origins`, Validierung der Origin-Liste, `restartRequired` in
+  allen Varianten, Key-Maskierung, Auge-Schalter, CORS-Origins-Feld.
+
 ## [1.7.4] - 2026-11-19
 
 ### Security

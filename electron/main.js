@@ -43,21 +43,10 @@ function modelRoots() {
 function serverInfo() {
   const cfg = sc.resolve(settings.server);
   const st = server.getState();
-  const info = sc.connectionInfo(cfg, sc.lanAddresses());
-  return {
-    config: cfg,
-    info: {
-      ...info,
-      running: !!st.running,
-      starting: !!st.starting,
-      // Im Betrieb zählt die tatsächlich gebundene Adresse/die echte Portnummer.
-      activePort: st.port || cfg.port,
-      activeHost: st.host || sc.bindHost(cfg),
-      activeLan: st.running ? !!st.lan : !!cfg.lan,
-      model: st.model || null,
-      error: st.error || null,
-    },
-  };
+  // runtimeInfo() in server-config: Adressen folgen dem laufenden Prozess
+  // (nicht der gespeicherten Config) und restartRequired sagt, ob die
+  // gespeicherte Config erst nach einem Neustart greift.
+  return { config: cfg, info: sc.runtimeInfo(cfg, st, sc.lanAddresses()) };
 }
 
 /** llama-server-Flags aus der Konfiguration (host/port/key/cors/parallel). */
@@ -68,6 +57,7 @@ function serverFlags() {
     port: cfg.port,
     apiKey: cfg.apiKey,
     cors: cfg.cors,
+    corsOrigins: cfg.corsOrigins,
     parallel: cfg.parallel,
   };
 }
