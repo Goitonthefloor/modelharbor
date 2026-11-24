@@ -573,21 +573,22 @@ test('uvAssetFor: unbekannte Plattform/Architektur liefert null', () => {
 
 const GB = 1024 * 1024 * 1024;
 
-test('estimateVramFromName: bekannte dGPUs liefern ihren typischen VRAM', () => {
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070'), 12 * GB);
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060'), 8 * GB);
-  assert.equal(estimateVramFromName('AMD Radeon RX 7900 XTX'), 24 * GB);
-  assert.equal(estimateVramFromName('AMD Radeon RX 9070'), 16 * GB);
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4090'), 24 * GB);
-  assert.equal(estimateVramFromName('Intel(R) Arc(TM) A770 Graphics'), 16 * GB);
+test('estimateVramFromName: bekannte dGPUs liefern ihren typischen VRAM in GB', () => {
+  // Öffentliche API liefert GB (Audit F5: vorher Bytes, widersprüchlich zur Doku).
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070'), 12);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060'), 8);
+  assert.equal(estimateVramFromName('AMD Radeon RX 7900 XTX'), 24);
+  assert.equal(estimateVramFromName('AMD Radeon RX 9070'), 16);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4090'), 24);
+  assert.equal(estimateVramFromName('Intel(R) Arc(TM) A770 Graphics'), 16);
 });
 
 test('estimateVramFromName: Ti-/XT-Varianten werden nicht verwechselt', () => {
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 Ti'), 12 * GB);
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti'), 8 * GB);
-  assert.equal(estimateVramFromName('AMD Radeon RX 7900 XT'), 20 * GB);
-  assert.equal(estimateVramFromName('AMD Radeon RX 9070 XT'), 16 * GB);
-  assert.equal(estimateVramFromName('NVIDIA GeForce GTX 1660 Ti'), 6 * GB);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 Ti'), 12);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti'), 8);
+  assert.equal(estimateVramFromName('AMD Radeon RX 7900 XT'), 20);
+  assert.equal(estimateVramFromName('AMD Radeon RX 9070 XT'), 16);
+  assert.equal(estimateVramFromName('NVIDIA GeForce GTX 1660 Ti'), 6);
 });
 
 test('estimateVramFromName: integrierte Grafiken und Unbekanntes liefern null', () => {
@@ -599,9 +600,15 @@ test('estimateVramFromName: integrierte Grafiken und Unbekanntes liefern null', 
   assert.equal(estimateVramFromName(null), null);
 });
 
-test('estimateVramFromName: Laptop-/Mobil-Varianten werden nicht geschätzt', () => {
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 Laptop GPU'), null);
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 3080 Mobile'), null);
+test('estimateVramFromName: iGPUs liefern null, Laptop-Varianten eigene GB-Werte', () => {
+  // Audit F5: Laptop-/Mobil-GPUs haben eigenen Speicherausbau und werden jetzt
+  // über eine eigene Tabelle geschätzt statt pauschal null zu liefern.
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 Laptop GPU'), 8);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 3080 Mobile'), 8);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4090 Laptop GPU'), 16);
+  // Unverändert: integrierte Grafiken und Software-Adapter bleiben null.
+  assert.equal(estimateVramFromName('AMD Radeon 780M'), null);
+  assert.equal(estimateVramFromName('Microsoft Basic Display Adapter'), null);
 });
 
 test('pickRegistryVram: ordnet qwMemorySize über den Treibernamen zu', () => {

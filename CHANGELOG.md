@@ -2,6 +2,45 @@
 
 All notable changes to ModelHarbor are documented in this file.
 
+## [1.8.2] - 2026-11-24
+
+### Fixed
+
+- **Server-Seite ließ sich nicht scrollen.** Die Ansicht stand auf `overflow: hidden` und fehlte in
+  der Liste der scrollbaren Seiten — bei kleinerem Fenster war der untere Teil (Endpunkte,
+  Code-Beispiele, Server-Log) unerreichbar, Wheel und Scrollbalken wirkungslos. Bei 1280×600 waren
+  1187 px Inhalt abgeschnitten. Vier Layout-Regressionstests prüfen jetzt jede Seite bei 1024×480.
+- **Streaming blockierte den ganzen Server (F9).** ONNX-Server: Modellzugriff und Netzwerk-Schreiben
+  lagen unter demselben Lock. Während einer laufenden Antwort konnten keine weiteren Anfragen
+  bedient werden. Der Lock schützt jetzt nur noch einzelne Modellschritte, jedes Fragment wird
+  außerhalb geschrieben.
+- **CORS-Prüfung ließ sich austricksen (F10).** Der Vergleich war eine Substring-Suche, damit kam
+  `https://evil-localhost.attacker.example` bei `--cors-origins localhost` durch. Geprüft wird
+  jetzt exakt auf Schema, Host und Port; der opake Origin `null` wird abgelehnt. Ohne
+  Konfiguration gilt `localhost` statt `*`.
+- **Kaputte Anfrage-Bodies ergaben 500 statt 4xx (F11).** `Transfer-Encoding: chunked` und ein
+  fehlendes `Content-Length` wurden als leerer Body gelesen (irreführendes „messages
+  erforderlich"), jetzt 411. Nicht-numerische oder negative Längen ergeben 400, ein Body über
+  8 MiB 413, ein hängender Upload 408 statt eines blockierten Threads.
+- **Ungültige Sampling-Parameter ergaben 500 (F12).** `max_tokens` `0`, `-5`, `3.9`, `"abc"`,
+  `temperature` 6, `top_p` 0 oder 1.5 und `top_k` -1 werden vor dem Senden der Kopfzeilen
+  validiert und als 400 beantwortet; `max_tokens` wird auf das Serverlimit (maximal 32768)
+  geklemmt. 500er-Antworten enthalten nur noch eine generische Meldung.
+- **ONNX-Server: `--api-key` fehlte (F13).** Das dokumentierte Flag existierte nicht, nur die
+  Umgebungsvariable. Ergänzt, samt Warnung, dass ein Key in der Kommandozeile für andere lokale
+  Benutzer lesbar ist. Außerdem neu: `--cors-origins` (Default `localhost`) und `--request-timeout`
+  (Default 60 s), das als Socket-Timeout hängende Clients beendet.
+- **API-Key-Prüfung war zu streng und `/v1/models` fehlte (F15).** Das Schema `bearer` wurde nur
+  in Großschreibung akzeptiert, jetzt case-insensitiv mit konstantzeitigem Vergleich. Agenten
+  können die Modellliste jetzt unter `GET /v1/models` abfragen.
+- **iGPU wurde nie erkannt (F5).** Die Erkennung stützte sich auf wenige Namensmuster und fiel bei
+  realen Gerätenamen von `wmic`/`lspci` durch: eine Radeon 780M oder UHD 630 galt als diskret,
+  umgekehrt wurden Modellnummern mit „Arc A770" verwechselt. Kategorien jetzt in fester
+  Reihenfolge (Software-Adapter, diskrete Muster, integrierte Muster, Hersteller-Fallback).
+  `estimateVramFromName` liefert wieder GB statt Bytes (24 statt 25769803776) und schätzt auch
+  Mobil-Varianten; `pickRegistryVram` wählt deterministisch (Namensrang vor Speichergröße), damit
+  eine RTX 4060 nicht den VRAM einer zusätzlich verbauten 4060 Ti erbt.
+
 ## [1.8.1] - 2026-11-24
 
 ### Fixed

@@ -57,94 +57,190 @@ function vendorFromPciId(id) {
 }
 
 /**
- * Unterscheidet integrierte von diskreten GPUs anhand des Herstellers und des
- * erkannten Namens. Frueher wurde nur Intel als "integrated" behandelt, was
- * AMD-APU-iGPUs (Radeon 6xxM/7xxM/8xxM, Renoir/Phoenix/Cezanne/...) faelschlich
- * als diskret und Intel-Arc-dGPUs faelschlich als integriert klassifiziert hat.
+ * Leitet den Hersteller aus dem Gerätenamen ab.
+ * Nötig, weil Quellen wie WMI (Win32_VideoController.Name), lspci-Zeilen ohne
+ * aufgelöste PCI-ID oder ein Aufruf mit nur einem Argument keinen Hersteller
+ * mitliefern. Ohne Ableitung war jede Klassifikation "diskret" (Audit F5:
+ * isIntegrated('Intel(R) UHD Graphics 770') === false).
+ */
+function vendorFromName(desc) {
+  const d = String(desc || '');
+  if (/qualcomm|adreno|snapdragon/i.test(d)) return 'Qualcomm';
+  if (/nvidia|geforce|quadro|tesla|\brtx\b|\bgtx\b/i.test(d)) return 'NVIDIA';
+  if (/\bamd\b|radeon|advanced\s+micro\s+devices|\bati\b/i.test(d)) return 'AMD';
+  if (/intel|\barc\b|iris|\buhd\b|\bhd\s*graphics/i.test(d)) return 'Intel';
+  if (/apple/i.test(d)) return 'Apple';
+  return null;
+}
+
+/**
+ * Namen, die auf eine eigene Karte mit eigenem VRAM hindeuten.
+ * Wird VOR den Integriert-Mustern geprüft, damit z. B. "Arc(TM) A770 Graphics"
+ * (dGPU) nicht über das Wort "Graphics" als integriert gilt.
+ */
+const DISCRETE_NAME_RE =
+  /\bradeon\s+rx\b|\bradeon\s+pro\b|\bradeon\s+vii\b|\bradeon\s+hd\s*\d{3,4}\b|\bradeon\s+[rx][579]\s*\d{3}\b|\bnavi\s*\d|\bvega\s*(?:10|20|56|64)\b|\bgeforce\b|\bquadro\b|\btesla\b|\b(?:rtx|gtx)\s*\d{3,4}\b|\btitan\b|\barc\s*(?:pro\s*)?[ab]\d{2,4}\b/i;
+
+/**
+ * Namen, die auf eine integrierte GPU hindeuten (geteilter Systemspeicher,
+ * kein eigener VRAM): Intel HD/UHD/Iris, Arc-iGPUs (140V/130V, "Arc Graphics"),
+ * AMD-APUs (6xxM/7xxM/8xxM, Vega-iGPU, Codenamen), Apple M-Serie,
+ * Qualcomm Adreno, virtuelle Grafiken (VMware/VirtualBox/QXL/virtio/Hyper-V)
+ * und Software-/Fallback-Adapter.
+ */
+const INTEGRATED_NAME_RE =
+  /microsoft\s+basic|\bbasic\s+display|\bbasic\s+render|virtual\s+vga|\badreno\b|\bradeon\s*\d{3}\s*m\b|\bradeon\b[^,]*\b(?:vega|graphics|integrated)\b|\bvega\s*\d{1,2}\b|\b(?:hd|uhd|iris)\s*(?:graphics|xe)?\b|\barc\s*\d{3}\s*v\b|\bgraphics\b|renoir|cezanne|raven|picasso|rembrandt|\bphoenix\d?\b|mendocino|\braphael\d?\b|strix|integrated|\bapu\b/i;
+
+/**
+ * Unterscheidet integrierte von diskreten GPUs.
+ *
+ * Erkennung laeuft ueber Muster im Gerätenamen und ist damit hersteller-
+ * unabhängig; der (ggf. aus dem Namen abgeleitete) Hersteller entscheidet nur
+ * noch im Fall "Muster sagt nichts" (Intel -> integriert, sonst diskret).
+ *
+ * Aufrufbar als isIntegrated(vendor, desc) und als isIntegrated(desc) —
+ * frueher ergab der Ein-Argument-Aufruf fuer JEDEN Namen false, weil das
+ * Argument als Hersteller gelesen wurde (Audit F5).
  */
 function isIntegrated(vendor, desc) {
-  const d = String(desc || '');
-  if (vendor === 'NVIDIA') return false;
-  if (vendor === 'Intel') {
-    // Arc mit Modellnummer (A770, B580, Arc Pro …) ist eine echte dGPU.
-    // "Arc Graphics" ohne Nummer und "Arc 140V/130V" sind die iGPUs in
-    // Core Ultra (geteilter Speicher) — kein eigener VRAM.
-    if (/\barc\b/i.test(d)) {
-      if (/\d{3}\s*v\b/i.test(d)) return true;
-      return !/\barc\s*(?:\(tm\)|\(r\))?\s*(?:pro\s*)?[ab]?\d{2,4}/i.test(d);
-    }
-    return true;
+  let v = vendor;
+  let d;
+  if (desc === undefined) {
+    d = String(vendor == null ? '' : vendor);
+    v = vendorFromName(d);
+  } else {
+    d = String(desc == null ? '' : desc);
+    v = v || vendorFromName(d);
   }
-  if (vendor === 'AMD') {
-    if (/radeon rx|navi\s*[0-9]|vega\s*(10|20|\d{2})|radeon vii|\bpro\b|workstation/i.test(d)) return false;
-    // APU-Codenamen / "Radeon ... Graphics" ohne RX -> integriert.
-    if (/renoir|cezanne|raven|picasso|rembrandt|\bphoenix\d?\b|mendocino|\braphael\d?\b|strix|integrated|vega\s*[0-9]|radeon\s*\d+m\b|\bgraphics(?:\s|$|\])/i.test(d)) return true;
-    return false; // unbekannt -> diskret (bisheriges Verhalten beibehalten)
-  }
-  if (vendor === 'Apple') return false;
+  // "(TM)"/"(R)"/®/™ stoeren Muster wie "Arc(TM) A770" oder "Radeon  Graphics"
+  const name = d.replace(/\((?:tm|r)\)|®|™/gi, ' ').replace(/\s+/g, ' ').trim();
+  // 1) Software-/Fallback-Adapter, virtuelle Grafiken und SoC-GPUs: geteilter Speicher
+  if (/microsoft\s+basic|\bbasic\s+display|\bbasic\s+render|virtual\s+vga|\badreno\b|\bsvga\b|\bqxl\b|virtio|\bvmware\b|virtualbox|hyper-v|parallels|\bvirgl\b|llvmpipe|swrast/i.test(name)) return true;
+  // 2) eindeutig diskret (eigener VRAM)
+  if (DISCRETE_NAME_RE.test(name)) return false;
+  // 3) eindeutig integriert
+  if (INTEGRATED_NAME_RE.test(name)) return true;
+  // 4) Apple M-Serie = Unified Memory, aeltere Apple-Geraete mit dGPU nicht
+  if (v === 'Apple') return /\bm\d/i.test(name);
+  // 5) Hersteller-Fallback: Intel baut fast nur iGPUs, Rest unbekannt -> diskret
+  if (v === 'Intel') return true;
   return false;
 }
 
 /**
- * Typischer VRAM bekannter GPUs, aus dem Gerätenamen geschätzt. Rückgabe in Bytes
- * oder null (unbekannt). Laptop-/Mobil-Varianten haben andere Speichergrößen und
- * werden bewusst NICHT geschätzt (null), integrierte Grafiken ebenfalls nicht.
+ * Typischer VRAM (GB) bekannter Desktop-GPUs, aus dem Gerätenamen geschätzt.
+ * Integrierte Grafiken und unbekannte Namen liefern null.
  */
 const VRAM_NAME_MAP = [
   // NVIDIA — spezifischere Namen zuerst (4070 Ti vor 4070)
+  [/rtx\s*5090/i, 32], [/rtx\s*5080/i, 16], [/rtx\s*5070\s*ti/i, 16], [/rtx\s*5070/i, 12],
+  [/rtx\s*5060\s*ti/i, 8], [/rtx\s*5060/i, 8],
   [/rtx\s*4090/i, 24], [/rtx\s*4080/i, 16], [/rtx\s*4070\s*ti/i, 12], [/rtx\s*4070/i, 12],
   [/rtx\s*4060\s*ti/i, 8], [/rtx\s*4060/i, 8],
-  [/rtx\s*3090/i, 24], [/rtx\s*3080/i, 10], [/rtx\s*3060\s*ti/i, 8], [/rtx\s*3060/i, 12],
-  [/gtx\s*1660\s*ti/i, 6], [/gtx\s*1650/i, 4],
+  [/rtx\s*3090/i, 24], [/rtx\s*3080\s*ti/i, 12], [/rtx\s*3080/i, 10],
+  [/rtx\s*3070\s*ti/i, 8], [/rtx\s*3070/i, 8], [/rtx\s*3060\s*ti/i, 8], [/rtx\s*3060/i, 12],
+  [/rtx\s*3050/i, 8],
+  [/rtx\s*2080\s*ti/i, 11], [/rtx\s*2080/i, 8], [/rtx\s*2070/i, 8], [/rtx\s*2060/i, 6],
+  [/gtx\s*1660\s*ti/i, 6], [/gtx\s*1660/i, 6], [/gtx\s*1650/i, 4], [/gtx\s*1080\s*ti/i, 11],
   // AMD
+  [/rx\s*9070\s*xt/i, 16], [/rx\s*9070/i, 16], [/rx\s*9060\s*xt/i, 16],
   [/rx\s*7900\s*xtx/i, 24], [/rx\s*7900\s*xt/i, 20], [/rx\s*7800\s*xt/i, 16],
-  [/rx\s*9070\s*xt/i, 16], [/rx\s*9070/i, 16], [/rx\s*7700\s*xt/i, 12], [/rx\s*7600/i, 8],
+  [/rx\s*7700\s*xt/i, 12], [/rx\s*7600/i, 8],
+  [/rx\s*6950/i, 16], [/rx\s*6900/i, 16], [/rx\s*6800\s*xt/i, 16], [/rx\s*6800/i, 16],
+  [/rx\s*6700\s*xt/i, 12], [/rx\s*6600\s*xt/i, 8], [/rx\s*6600/i, 8],
   // Intel
-  [/arc\s*a770/i, 16], [/arc\s*a750/i, 8],
+  [/arc\s*a770/i, 16], [/arc\s*a750/i, 8], [/arc\s*a380/i, 6],
+  [/arc\s*b580/i, 12], [/arc\s*b570/i, 10],
 ];
 
+/**
+ * Typischer VRAM (GB) der Mobil-/Laptop-Varianten. Diese haben einen anderen
+ * Speicherausbau als die Desktop-Karte gleichen Namens (RTX 4090 Laptop = 16 GB,
+ * Desktop = 24 GB) und brauchen deshalb eine eigene Tabelle. Audit F5: vorher
+ * lieferten alle Laptop-Namen null.
+ */
+const VRAM_MOBILE_MAP = [
+  [/(?:rtx\s*)?5090\b/i, 24], [/(?:rtx\s*)?5080\b/i, 16],
+  [/(?:rtx\s*)?5070\s*ti\b/i, 12], [/(?:rtx\s*)?5070\b/i, 8], [/(?:rtx\s*)?5060\b/i, 8],
+  [/(?:rtx\s*)?4090\b/i, 16], [/(?:rtx\s*)?4080\b/i, 12], [/(?:rtx\s*)?4070\b/i, 8],
+  [/(?:rtx\s*)?4060\b/i, 8], [/(?:rtx\s*)?4050\b/i, 6],
+  [/(?:rtx\s*)?3080\s*ti\b/i, 16], [/(?:rtx\s*)?3080\b/i, 8], [/(?:rtx\s*)?3070\s*ti\b/i, 8],
+  [/(?:rtx\s*)?3070\b/i, 8], [/(?:rtx\s*)?3060\b/i, 6], [/(?:rtx\s*)?3050\s*ti\b/i, 4],
+  [/(?:rtx\s*)?3050\b/i, 4], [/(?:rtx\s*)?2080\b/i, 8], [/(?:rtx\s*)?2070\b/i, 8],
+  [/(?:rtx\s*)?2060\b/i, 6], [/gtx\s*1660\s*ti\b/i, 6], [/gtx\s*1650\b/i, 4],
+  [/rx\s*7900\s*m\b/i, 16], [/rx\s*7600\s*m\b/i, 8], [/rx\s*6800\s*m\b/i, 12],
+  [/rx\s*6700\s*m\b/i, 10], [/rx\s*6600\s*m\b/i, 8], [/rx\s*6500\s*m\b/i, 4],
+];
+
+/**
+ * Schätzt den typischen VRAM aus dem Gerätenamen — öffentliche API, Rückgabe
+ * in GB (nicht Bytes) oder null bei integrierten/unbekannten Namen.
+ * Einheiten laut Doku: GB. Intern wird für Vergleiche mit qwMemorySize
+ * estimateVramBytesFromName() verwendet.
+ */
 function estimateVramFromName(name) {
   // (TM)/(R)/®/™ raus, sonst scheitern Muster wie "Arc(TM) A770"
   const n = String(name || '').replace(/\((?:tm|r)\)|®|™/gi, ' ');
   if (!n.trim()) return null;
-  // Laptop-/Mobil-Varianten: anderer Speicherausbau -> keine Schätzung
-  if (/laptop|mobile|max-?q|notebook/i.test(n)) return null;
-  // integrierte Grafik (kein eigener VRAM)
-  if (/radeon\s*graphics|vega\s*\d+\s*graphics|intel\s*(hd|uhd|iris)|apple\s*m\d/i.test(n)) return null;
+  // integrierte Grafik / Software-Adapter: kein eigener VRAM
+  if (/radeon\s*(?:graphics|vega)|vega\s*\d+\s*graphics|intel\s*(?:hd|uhd|iris)|\buhd\s*graphics\b|iris\s*xe|apple\s*m\d|\badreno\b|basic\s+display/i.test(n)) {
+    return null;
+  }
   // Explizite Größenangabe im Namen schlägt die Tabelle: sonst wird z. B. die
   // 16-GB-Variante der RTX 4060 Ti als 8 GB geschätzt.
   const explicit = n.match(/\b(\d{1,2})\s*GB\b/i);
   if (explicit) {
     const gb = Number(explicit[1]);
-    if (gb >= 2 && gb <= 96) return gb * 1024 * 1024 * 1024;
+    if (gb >= 2 && gb <= 96) return gb;
   }
-  for (const [re, gb] of VRAM_NAME_MAP) {
-    if (re.test(n)) return gb * 1024 * 1024 * 1024;
+  // Laptop-/Mobil-Varianten haben eigene Speichergrößen (eigene Tabelle)
+  const mobile = /laptop|mobile|max-?q|notebook/i.test(n);
+  for (const [re, gb] of (mobile ? VRAM_MOBILE_MAP : VRAM_NAME_MAP)) {
+    if (re.test(n)) return gb;
   }
   return null;
+}
+
+/** Wie estimateVramFromName, aber in Bytes (intern für qwMemorySize-Vergleiche). */
+function estimateVramBytesFromName(name) {
+  const gb = estimateVramFromName(name);
+  return gb == null ? null : gb * 1024 * 1024 * 1024;
 }
 
 /**
  * Sucht zu einem GPU-Namen den passenden Registry-VRAM-Wert
  * (HardwareInformation.qwMemorySize ist ein QWORD und damit auch >4 GB korrekt).
  * `entries` = [{ driverDesc, bytes }]. Reine Funktion, damit testbar.
+ *
+ * Auswahl deterministisch: erst der beste Namensrang (identischer Treibername
+ * vor Namensvariante vor Modellnummer), bei gleichem Rang der größte
+ * Speicherwert. Vorher gewann bei mehreren Treffern immer der größte Wert —
+ * eine RTX 4060 bekam so den VRAM einer zusätzlich verbauten 4060 Ti 16 GB.
  */
 function pickRegistryVram(gpuName, entries) {
   const name = String(gpuName || '').toLowerCase().trim();
   if (!name || !Array.isArray(entries) || !entries.length) return null;
-  const match = (desc) => {
+  const rank = (desc) => {
     const d = String(desc || '').toLowerCase().trim();
-    if (!d) return false;
-    if (name.includes(d) || d.includes(name)) return true;
-    // Teiltreffer: erstes aussagekräftiges Namenswort (>=4 Zeichen) enthalten
-    const key = d.split(/[\s(),]+/).filter((w) => w.length >= 4).slice(0, 2).join(' ');
-    return key ? name.includes(key) : false;
+    if (!d) return 0;
+    if (d === name) return 3; // identischer Treibername
+    if (name.includes(d) || d.includes(name)) return 2; // Namensvariante (Suffixe)
+    // Teiltreffer nur über die Modellnummer ("rtx 4090 24gb" -> "nvidia geforce rtx 4090");
+    // generische Herstellerwörter reichen dafür nicht.
+    const num = d.match(/\b(\d{3,4})\s*(?:m|ti|xt|xtx|super)?\b/);
+    if (num && new RegExp(`\\b${num[1]}\\b`).test(name)) return 1;
+    return 0;
   };
+  let bestRank = 0;
   let best = null;
   for (const e of entries) {
     if (!e || !Number.isFinite(e.bytes) || e.bytes <= 0) continue;
-    if (!match(e.driverDesc)) continue;
-    if (!best || e.bytes > best) best = e.bytes;
+    const r = rank(e.driverDesc);
+    if (!r) continue;
+    if (r > bestRank || (r === bestRank && (!best || e.bytes > best))) {
+      bestRank = r;
+      best = e.bytes;
+    }
   }
   return best;
 }
@@ -394,8 +490,9 @@ async function detectWindows() {
       }
       const discrete = !isIntegrated(vendor, name);
       // Letzter Fallback: aus dem Gerätenamen schätzen (nur diskrete Karten).
+      // estimateVramFromName liefert GB (öffentliche API), intern brauchen wir Bytes.
       if (discrete && (!vramBytes || vramBytes < 1073741824)) {
-        const est = estimateVramFromName(name);
+        const est = estimateVramBytesFromName(name);
         if (est) { vramBytes = est; vramSource = 'estimate'; }
       }
       gpus.push({
@@ -662,4 +759,4 @@ async function scanHardware() {
   return hw;
 }
 
-module.exports = { scanHardware, recommendBackend, isIntegrated, formatBytes, run, estimateVramFromName, pickRegistryVram, pciAddressMatches };
+module.exports = { scanHardware, recommendBackend, isIntegrated, vendorFromName, formatBytes, run, estimateVramFromName, estimateVramBytesFromName, pickRegistryVram, pciAddressMatches };

@@ -2,7 +2,7 @@
 """UI-Layout-Pruefung fuer alle vier Views: Ueberlauf, Scrollbarkeit, Wheel-Reaktion,
 horizontaler Ueberlauf. Nutzt den Mock aus scripts/ui-smoke.py.
 
-Ausfuehrung: /home/gregerr/workspace/ertrag-200/browser-venv/bin/python3 scripts/probe-ui-layout.py
+Ausfuehrung: <playwright-venv>/bin/python3 scripts/probe-ui-layout.py
 Exit 1, wenn eine aktive View Inhalt abschneidet, ohne scrollbar zu sein.
 """
 import json

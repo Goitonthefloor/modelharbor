@@ -177,13 +177,13 @@ test('pciAddressMatches: sysfs-Adresse mit Domain passt zur lspci-Adresse ohne D
 });
 
 test('estimateVramFromName: explizite GB-Angabe im Namen schlägt die Tabelle', () => {
-  const GB = 1024 * 1024 * 1024;
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti 16GB'), 16 * GB);
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 12GB'), 12 * GB);
-  assert.equal(estimateVramFromName('AMD Radeon RX 7600 XT 16GB'), 16 * GB);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti 16GB'), 16);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4070 12GB'), 12);
+  assert.equal(estimateVramFromName('AMD Radeon RX 7600 XT 16GB'), 16);
   // Ohne Angabe bleibt die Tabelle maßgeblich
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti'), 8 * GB);
-  // Laptop und integrierte Grafik liefern weiterhin null
-  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti Laptop GPU 16GB'), null);
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti'), 8);
+  // Explizite Geräteangabe schlägt auch die Mobil-Tabelle (Gerät meldet echten Speicher)
+  assert.equal(estimateVramFromName('NVIDIA GeForce RTX 4060 Ti Laptop GPU 16GB'), 16);
+  // Integrierte Grafik bleibt null, auch wenn "8GB" im Namen steht (Shared Memory)
   assert.equal(estimateVramFromName('AMD Radeon Graphics 8GB'), null);
 });
